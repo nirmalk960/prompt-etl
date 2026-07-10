@@ -2,12 +2,12 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "prompt-etl-meg.fullname" . }}-api
+  name: {{ include "prompt-etl.fullname" . }}-api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "prompt-etl-meg.fullname" . }}-api
+    name: {{ include "prompt-etl.fullname" . }}-api
   minReplicas: {{ .Values.api.hpa.minReplicas }}
   maxReplicas: {{ .Values.api.hpa.maxReplicas }}
   metrics:
@@ -23,12 +23,12 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "prompt-etl-meg.fullname" . }}-worker
+  name: {{ include "prompt-etl.fullname" . }}-worker
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "prompt-etl-meg.fullname" . }}-worker
+    name: {{ include "prompt-etl.fullname" . }}-worker
   minReplicas: {{ .Values.worker.hpa.minReplicas }}
   maxReplicas: {{ .Values.worker.hpa.maxReplicas }}
   metrics:

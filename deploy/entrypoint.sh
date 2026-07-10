@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PromptETL-Meg single-image entrypoint.
+# Prompt ETL single-image entrypoint.
 #   1. Detect the container memory budget (cgroup v2 -> v1 -> /proc/meminfo).
 #   2. Auto-tune worker concurrency and Postgres shared_buffers from it.
 #   3. First boot: initdb + create role/database.

@@ -2,15 +2,15 @@
 
 image:
   api:
-    repository: ghcr.io/your-org/prompt-etl-meg-api
+    repository: ghcr.io/your-org/prompt-etl-api
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   worker:
-    repository: ghcr.io/your-org/prompt-etl-meg-worker
+    repository: ghcr.io/your-org/prompt-etl-worker
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   frontend:
-    repository: ghcr.io/your-org/prompt-etl-meg-frontend
+    repository: ghcr.io/your-org/prompt-etl-frontend
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 

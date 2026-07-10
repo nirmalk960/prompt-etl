@@ -141,5 +141,5 @@ lets users `docker compose up` without remembering flags.
 
 This image scales **vertically** (more RAM/CPU on one machine). For
 horizontal scaling — multiple workers, external Postgres/S3, autoscaling —
-use the Kubernetes chart in [`charts/prompt-etl-meg`](../charts/prompt-etl-meg)
+use the Kubernetes chart in [`charts/prompt-etl`](../charts/prompt-etl)
 with the per-service images built by [`docker-compose.yml`](../docker-compose.yml).

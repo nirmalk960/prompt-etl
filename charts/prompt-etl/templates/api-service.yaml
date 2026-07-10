@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "prompt-etl-meg.fullname" . }}-api
+  name: {{ include "prompt-etl.fullname" . }}-api
   labels:
-    {{- include "prompt-etl-meg.labels" . | nindent 4 }}
+    {{- include "prompt-etl.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
   type: {{ .Values.api.service.type }}
@@ -12,5 +12,5 @@ spec:
       targetPort: http
       name: http
   selector:
-    app.kubernetes.io/name: {{ include "prompt-etl-meg.name" . }}
+    app.kubernetes.io/name: {{ include "prompt-etl.name" . }}
     app.kubernetes.io/component: api

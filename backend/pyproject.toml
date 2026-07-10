@@ -1,5 +1,5 @@
 [project]
-name = "prompt-etl-meg"
+name = "prompt-etl"
 version = "0.1.0"
 description = "Server-deployed multi-tenant ETL platform with NL pipeline builder and tiered compute engines."
 requires-python = ">=3.11"

@@ -1,6 +1,6 @@
 # Architecture
 
-PromptETL-Meg separates **control plane** (API + DB + queue) from **data plane**
+Prompt ETL separates **control plane** (API + DB + queue) from **data plane**
 (worker pods + engines + object storage). The API never reads or writes user
 data; it only mints presigned URLs and enqueues jobs. This is the single most
 important property for scaling to large datasets.

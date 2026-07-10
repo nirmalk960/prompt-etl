@@ -249,7 +249,7 @@ prompt-etl/
 │   └── nginx.conf
 ├── deploy/                      # single-image build (Dockerfile.allinone, nginx,
 │                                #   supervisord, entrypoint, publish, compose)
-├── charts/prompt-etl-meg/       # Phase 1 Helm skeleton (Kubernetes)
+├── charts/prompt-etl/           # Phase 1 Helm skeleton (Kubernetes)
 ├── docs/                        # ARCHITECTURE, PHASE2_SPARK, PHASE3_PRODUCTION
 ├── scripts/                     # install, setup_ollama, smoke tests, test data gen
 ├── docker-compose.yml           # local dev stack

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Heavy-duty smoke tests for PromptETL-Meg:
+# Heavy-duty smoke tests for Prompt ETL:
 #   - Tiered CSV uploads (multipart, ingest, pipeline)
 #   - Engine router verification (pandas / polars / duckdb)
 #   - Spark pin rejection (Phase 1)

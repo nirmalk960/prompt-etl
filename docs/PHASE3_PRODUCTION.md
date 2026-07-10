@@ -1,6 +1,6 @@
 # Phase 3 — Multi-tenant production hardening
 
-This is the design (not yet implemented) for taking PromptETL-Meg from a
+This is the design (not yet implemented) for taking Prompt ETL from a
 self-hosted single-tenant deployment to a multi-tenant SaaS or enterprise
 self-hosted offering.
 
@@ -72,7 +72,7 @@ self-hosted offering.
 
 ## Deployment
 
-- Helm chart at [charts/prompt-etl-meg/](../charts/prompt-etl-meg/) gains:
+- Helm chart at [charts/prompt-etl/](../charts/prompt-etl/) gains:
   - `values.yaml` knobs for `replicaCount`, `resources`, `autoscaling`,
     `ingress.tls`, `oidc.{issuer, audience, clientId}`, `objectStore.{kind, ...}`
   - Subchart deps: `bitnami/postgresql`, `bitnami/redis`, `minio/minio`

@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "prompt-etl-meg.fullname" . }}
+  name: {{ include "prompt-etl.fullname" . }}
   labels:
-    {{- include "prompt-etl-meg.labels" . | nindent 4 }}
+    {{- include "prompt-etl.labels" . | nindent 4 }}
   annotations:
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
 spec:
@@ -19,7 +19,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "prompt-etl-meg.fullname" $ }}-api
+                name: {{ include "prompt-etl.fullname" $ }}-api
                 port:
                   number: {{ $.Values.api.service.port }}
           {{- end }}

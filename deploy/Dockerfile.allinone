@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# PromptETL-Meg — single-image "deploy anywhere" build.
+# Prompt ETL — single-image "deploy anywhere" build.
 #
 # One container runs: nginx (UI + /api proxy), uvicorn API, arq worker,
 # Postgres, and Redis, supervised by supervisord. All state lives under the
 # /data volume. The engine router adapts to the container's cgroup memory
 # limit automatically.
 #
-# Build (from the PromptETL-Meg repo root):
+# Build (from the Prompt ETL repo root):
 #   docker build -f deploy/Dockerfile.allinone -t prompt-etl:latest .
 #
 # Multi-arch build:

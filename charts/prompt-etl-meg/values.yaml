@@ -1,0 +1,108 @@
+# Phase 1 Helm values. Phase 2/3 will add Spark Operator + OIDC + observability.
+
+image:
+  api:
+    repository: ghcr.io/your-org/prompt-etl-meg-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  worker:
+    repository: ghcr.io/your-org/prompt-etl-meg-worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/your-org/prompt-etl-meg-frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: 1,    memory: 1Gi  }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+
+worker:
+  replicaCount: 2
+  resources:
+    # Generous: workers run pandas/polars/duckdb against parquet inputs.
+    requests: { cpu: "1",  memory: 4Gi  }
+    limits:   { cpu: "4",  memory: 16Gi }
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 20
+    # Phase 3: a custom metric `arq_queue_depth` would beat CPU here.
+    targetCPUUtilizationPercentage: 70
+  env:
+    ENGINE_SPARK_THRESHOLD_BYTES: "53687091200"  # 50 GiB
+    ARQ_MAX_JOBS: "4"
+
+frontend:
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 80
+
+postgres:
+  enabled: true
+  external:
+    url: ""  # set to use a managed DB; if empty, deploys the subchart
+  auth:
+    username: prompt_etl
+    password: change-me
+    database: prompt_etl
+
+redis:
+  enabled: true
+  external:
+    url: ""
+
+objectStore:
+  kind: s3  # s3 | minio
+  bucket: prompt-etl
+  s3:
+    endpointUrl: ""        # e.g. https://s3.amazonaws.com or http://minio.minio:9000
+    publicEndpointUrl: ""  # what the browser uses
+    region: us-east-1
+    accessKey: ""
+    secretKey: ""
+
+ollama:
+  enabled: false           # external by default; flip to deploy a sidecar
+  url: ""
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: prompt-etl.example.com
+      paths: [/]
+  tls: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Phase 2: Spark Kubernetes Operator
+spark:
+  enabled: false
+  operator:
+    namespace: spark-operator
+  image:
+    repository: ghcr.io/your-org/prompt-etl-spark-runtime
+    tag: "0.1.0"
+  defaults:
+    driverMemory: 2g
+    executorMemory: 8g
+    initialExecutors: 2
+    minExecutors: 2
+    maxExecutors: 50

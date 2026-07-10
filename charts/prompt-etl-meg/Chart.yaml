@@ -1,0 +1,17 @@
+apiVersion: v2
+name: prompt-etl-meg
+description: PromptETL-Meg — tiered ETL platform (Phase 1 skeleton)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+icon: https://avatars.githubusercontent.com/u/0?v=4
+keywords:
+  - etl
+  - data
+  - llm
+  - pandas
+  - polars
+  - duckdb
+  - spark
+maintainers:
+  - name: PromptETL-Meg

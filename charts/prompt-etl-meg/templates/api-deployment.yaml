@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "prompt-etl-meg.fullname" . }}-api
+  labels:
+    {{- include "prompt-etl-meg.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "prompt-etl-meg.name" . }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "prompt-etl-meg.name" . }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.external.url | default "postgresql+asyncpg://prompt_etl:prompt_etl@postgres:5432/prompt_etl" | quote }}
+            - name: REDIS_URL
+              value: {{ .Values.redis.external.url | default "redis://redis:6379/0" | quote }}
+            - name: S3_ENDPOINT_URL
+              value: {{ .Values.objectStore.s3.endpointUrl | quote }}
+            - name: S3_PUBLIC_ENDPOINT_URL
+              value: {{ .Values.objectStore.s3.publicEndpointUrl | quote }}
+            - name: S3_REGION
+              value: {{ .Values.objectStore.s3.region | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.objectStore.bucket | quote }}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "prompt-etl-meg.fullname" . }}-secrets
+                  key: s3AccessKey
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "prompt-etl-meg.fullname" . }}-secrets
+                  key: s3SecretKey
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

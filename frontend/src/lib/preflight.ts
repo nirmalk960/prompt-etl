@@ -98,28 +98,28 @@ function parseAggregateAliases(prompt: string): string[] {
 
   // total_revenue (sum order_total)  — alias must be a single identifier
   const p1 = new RegExp(
-    `\\b([A-Za-z_]\\w*)\\s*\\(\\s*(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s*\\)`,
+    `\\b([A-Za-z_]\\w*)\\s*\\(\\s*\\b(${AGG_FN})\\b\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s*\\)`,
     "gi",
   );
   while ((m = p1.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
 
   // total_revenue = sum order_total  /  total_revenue: the sum of order_total
   const p2 = new RegExp(
-    `\\b([A-Za-z_]\\w*)\\s*(?:=|:)\\s*(?:the\\s+)?(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    `\\b([A-Za-z_]\\w*)\\s*(?:=|:)\\s*(?:the\\s+)?\\b(${AGG_FN})\\b\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
     "gi",
   );
   while ((m = p2.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
 
   // sum(order_total) as total_revenue
   const p3 = new RegExp(
-    `(${AGG_FN})\\s*\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s+as\\s+([A-Za-z_]\\w*)`,
+    `\\b(${AGG_FN})\\b\\s*\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s+as\\s+([A-Za-z_]\\w*)`,
     "gi",
   );
   while ((m = p3.exec(prompt)) !== null) out.add(normalizeCol(m[3]));
 
   // total_revenue as [the] sum [of] order_total
   const p4 = new RegExp(
-    `\\b([A-Za-z_]\\w*)\\s+as\\s+(?:the\\s+)?(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    `\\b([A-Za-z_]\\w*)\\s+as\\s+(?:the\\s+)?\\b(${AGG_FN})\\b\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
     "gi",
   );
   while ((m = p4.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
@@ -133,14 +133,18 @@ function parseAggregateAliases(prompt: string): string[] {
 
 function parseAggregateMetrics(prompt: string): AggMetric[] {
   const out = new Map<string, AggMetric>();
+  // Word boundaries are required so "avg" inside "avg_order_value" is not
+  // treated as a metric fn with a fake column "_order_value".
   const metricExpr = new RegExp(
-    `(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    `\\b(${AGG_FN})\\b\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
     "gi",
   );
   let m: RegExpExecArray | null = null;
   while ((m = metricExpr.exec(prompt)) !== null) {
     const fn = normalizeAggFn(m[1]);
     const column = m[2].trim();
+    // Reject leftovers from partial identifier splits (e.g. "_order_value").
+    if (column.startsWith("_")) continue;
     out.set(`${fn}:${normalizeCol(column)}`, { fn, column });
   }
   return Array.from(out.values());

@@ -84,40 +84,62 @@ function parseGroupByColumns(prompt: string): string[] | null {
     });
 }
 
+const AGG_FN = "sum|mean|avg|average|count|min|max";
+
+function normalizeAggFn(raw: string): string {
+  const fn = raw.toLowerCase();
+  if (fn === "mean" || fn === "average") return "avg";
+  return fn;
+}
+
 function parseAggregateAliases(prompt: string): string[] {
   const out = new Set<string>();
   let m: RegExpExecArray | null = null;
 
-  // total_revenue (sum order_total)
-  const p1 =
-    /([A-Za-z_][\w\s]*)\s*\(\s*(sum|mean|avg|count|min|max)\s*(?:of\s+)?\(?\s*([A-Za-z_]\w*)\s*\)?\s*\)/gi;
+  // total_revenue (sum order_total)  — alias must be a single identifier
+  const p1 = new RegExp(
+    `\\b([A-Za-z_]\\w*)\\s*\\(\\s*(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s*\\)`,
+    "gi",
+  );
   while ((m = p1.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
 
-  // total_revenue = sum order_total
-  const p2 =
-    /([A-Za-z_][\w\s]*)\s*(?:=|:)\s*(sum|mean|avg|count|min|max)\s*(?:of\s+)?\(?\s*([A-Za-z_]\w*)\s*\)?/gi;
+  // total_revenue = sum order_total  /  total_revenue: the sum of order_total
+  const p2 = new RegExp(
+    `\\b([A-Za-z_]\\w*)\\s*(?:=|:)\\s*(?:the\\s+)?(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    "gi",
+  );
   while ((m = p2.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
 
   // sum(order_total) as total_revenue
-  const p3 =
-    /(sum|mean|avg|count|min|max)\s*\(?\s*([A-Za-z_]\w*)\s*\)?\s+as\s+([A-Za-z_][\w\s]*)/gi;
+  const p3 = new RegExp(
+    `(${AGG_FN})\\s*\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?\\s+as\\s+([A-Za-z_]\\w*)`,
+    "gi",
+  );
   while ((m = p3.exec(prompt)) !== null) out.add(normalizeCol(m[3]));
 
-  // total_revenue as sum(order_total)
-  const p4 =
-    /([A-Za-z_][\w\s]*)\s+as\s+(sum|mean|avg|count|min|max)\s*\(?\s*([A-Za-z_](?:[\w]*)(?:\s+[A-Za-z_][\w]*)*)\s*\)?/gi;
+  // total_revenue as [the] sum [of] order_total
+  const p4 = new RegExp(
+    `\\b([A-Za-z_]\\w*)\\s+as\\s+(?:the\\s+)?(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    "gi",
+  );
   while ((m = p4.exec(prompt)) !== null) out.add(normalizeCol(m[1]));
 
+  // Drop filler / reserved words that greedy matches can occasionally capture.
+  for (const junk of ["the", "a", "an", "and", "by", "of", "group", "calculate", "as"]) {
+    out.delete(junk);
+  }
   return Array.from(out);
 }
 
 function parseAggregateMetrics(prompt: string): AggMetric[] {
   const out = new Map<string, AggMetric>();
-  const metricExpr =
-    /(sum|mean|avg|count|min|max)\s*(?:of\s+)?\(?\s*([A-Za-z_][\w]*(?:\s+[A-Za-z_][\w]*)*)\s*\)?/gi;
+  const metricExpr = new RegExp(
+    `(${AGG_FN})\\s*(?:of\\s+)?\\(?\\s*([A-Za-z_]\\w*)\\s*\\)?`,
+    "gi",
+  );
   let m: RegExpExecArray | null = null;
   while ((m = metricExpr.exec(prompt)) !== null) {
-    const fn = m[1].toLowerCase() === "mean" ? "avg" : m[1].toLowerCase();
+    const fn = normalizeAggFn(m[1]);
     const column = m[2].trim();
     out.set(`${fn}:${normalizeCol(column)}`, { fn, column });
   }

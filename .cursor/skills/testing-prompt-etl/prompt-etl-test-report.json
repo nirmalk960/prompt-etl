@@ -1,0 +1,527 @@
+{
+  "api": "http://localhost:8090/api",
+  "engines": [
+    "pandas",
+    "polars",
+    "duckdb"
+  ],
+  "ollama": false,
+  "counts": {
+    "PASS": 60,
+    "FAIL": 0,
+    "SKIP": 13
+  },
+  "results": [
+    {
+      "category": "platform",
+      "name": "health endpoint",
+      "status": "PASS",
+      "seconds": 0.03,
+      "detail": ""
+    },
+    {
+      "category": "platform",
+      "name": "ready endpoint reports resources",
+      "status": "PASS",
+      "seconds": 0.0,
+      "detail": "ram=7.8GiB cpus=10 store=local ollama=False model=qwen2.5-coder:7b"
+    },
+    {
+      "category": "platform",
+      "name": "UI is served",
+      "status": "PASS",
+      "seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "category": "platform",
+      "name": "dev auth identity",
+      "status": "PASS",
+      "seconds": 0.02,
+      "detail": ""
+    },
+    {
+      "category": "platform",
+      "name": "requests without auth are rejected",
+      "status": "PASS",
+      "seconds": 0.01,
+      "detail": ""
+    },
+    {
+      "category": "ingest",
+      "name": "CSV upload -> parquet",
+      "status": "PASS",
+      "seconds": 1.06,
+      "detail": "dataset=9b6d6365-562b-4c46-b952-2703c12bc943 rows=250"
+    },
+    {
+      "category": "ingest",
+      "name": "NDJSON upload -> parquet",
+      "status": "PASS",
+      "seconds": 1.06,
+      "detail": "dataset=c4e2577a-1949-4305-ab2e-0af61f36a6fe rows=250"
+    },
+    {
+      "category": "ingest",
+      "name": "XLSX upload -> parquet",
+      "status": "PASS",
+      "seconds": 1.06,
+      "detail": "dataset=267c59e7-ae8c-43f5-9706-17e68f57e443 rows=250"
+    },
+    {
+      "category": "ingest",
+      "name": "Parquet upload (round-trip from export)",
+      "status": "PASS",
+      "seconds": 1.06,
+      "detail": "dataset=a748fba3-5530-4b5a-8c08-5ab7331448f4 rows=250"
+    },
+    {
+      "category": "ingest",
+      "name": "multipart upload with several parts",
+      "status": "SKIP",
+      "seconds": 0.13,
+      "detail": "part size 67108864 > fixture; covered by scale tests"
+    },
+    {
+      "category": "validation",
+      "name": "duplicate node ids -> 422",
+      "status": "PASS",
+      "seconds": 0.01,
+      "detail": ""
+    },
+    {
+      "category": "validation",
+      "name": "edge to unknown node -> 422",
+      "status": "PASS",
+      "seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "category": "validation",
+      "name": "unknown node kind -> 422",
+      "status": "PASS",
+      "seconds": 0.0,
+      "detail": ""
+    },
+    {
+      "category": "validation",
+      "name": "filter on missing column fails clearly",
+      "status": "PASS",
+      "seconds": 1.03,
+      "detail": "'no_such_column'"
+    },
+    {
+      "category": "validation",
+      "name": "unparseable prompt without LLM fails clearly",
+      "status": "PASS",
+      "seconds": 2.05,
+      "detail": "No deterministic match for prompt and Ollama is unavailable: Ollama is disabled by config (OLLAMA_DISABLE=1)"
+    },
+    {
+      "category": "validation",
+      "name": "source without dataset fails",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] filter equals",
+      "status": "PASS",
+      "seconds": 1.06,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] filter not equals",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] filter greater than",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] filter less than",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] select columns",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] rename column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] drop nulls in one column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] drop nulls in any column",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] deduplicate on key keeps all columns",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] deduplicate full rows",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] aggregate simple (sum by)",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": "metric column=order_total"
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] aggregate with aliases",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] aggregate by month()",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] sort descending",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[pandas] sort ascending",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "llm",
+      "name": "[pandas] fill nulls",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[pandas] custom computed column",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[pandas] natural-language filter",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[pandas] natural-language aggregate",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "ops",
+      "name": "[polars] filter equals",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] filter not equals",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] filter greater than",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] filter less than",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] select columns",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] rename column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] drop nulls in one column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] drop nulls in any column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] deduplicate on key keeps all columns",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] deduplicate full rows",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] aggregate simple (sum by)",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": "metric column=order_total_sum"
+    },
+    {
+      "category": "ops",
+      "name": "[polars] aggregate with aliases",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] aggregate by month()",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] sort descending",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[polars] sort ascending",
+      "status": "PASS",
+      "seconds": 1.03,
+      "detail": ""
+    },
+    {
+      "category": "llm",
+      "name": "[polars] fill nulls",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[polars] custom computed column",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[polars] natural-language filter",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[polars] natural-language aggregate",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] filter equals",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] filter not equals",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] filter greater than",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] filter less than",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] select columns",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] rename column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] drop nulls in one column",
+      "status": "PASS",
+      "seconds": 1.04,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] drop nulls in any column",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] deduplicate on key keeps all columns",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] deduplicate full rows",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] aggregate simple (sum by)",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": "metric column=order_total_sum"
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] aggregate with aliases",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] aggregate by month()",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] sort descending",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "ops",
+      "name": "[duckdb] sort ascending",
+      "status": "PASS",
+      "seconds": 1.05,
+      "detail": ""
+    },
+    {
+      "category": "llm",
+      "name": "[duckdb] fill nulls",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[duckdb] custom computed column",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[duckdb] natural-language filter",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    },
+    {
+      "category": "llm",
+      "name": "[duckdb] natural-language aggregate",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "Ollama not available to the container"
+    }
+  ]
+}

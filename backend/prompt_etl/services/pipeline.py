@@ -154,15 +154,13 @@ async def _gen_code(
     code = extract_code(raw)
     if engine in {"pandas", "polars"}:
         code = normalize_python_result_assignment(code)
-    # Some local model runs can return an empty string for complex prompts.
-    # Prefer a deterministic fallback over hard-failing the whole pipeline.
+    # Never substitute a passthrough here: it would report success while
+    # silently skipping the requested transformation.
     if not code.strip():
-        fallback = stub_codegen(
-            engine=engine, node_kind=node_kind, user_prompt=user_prompt
+        raise PipelineError(
+            f"The model returned no code for {node_kind} prompt: {user_prompt!r}. "
+            "Rephrase the prompt or try again."
         )
-        if fallback is not None:
-            return fallback
-        return passthrough_code(engine)
     return code
 
 

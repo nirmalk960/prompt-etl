@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -51,7 +52,19 @@ def _json_safe(value: Any) -> Any:
     the engine and source schema. We normalize via JSON round-trip with
     `default=str` so persistence to JSONB and SSE publishing never fails.
     """
-    return json.loads(json.dumps(value, default=str))
+    # NaN/Infinity are valid in Python's json but rejected by Postgres JSONB,
+    # so they become null.
+    return _replace_non_finite(json.loads(json.dumps(value, default=str)))
+
+
+def _replace_non_finite(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _replace_non_finite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_non_finite(v) for v in value]
+    return value
 
 
 async def emit(

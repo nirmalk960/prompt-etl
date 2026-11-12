@@ -79,9 +79,9 @@ _OP_HINT_PANDAS: dict[str, str] = {
     "fill_nulls": "result = df.fillna({col: value, ...})",
     "rename": "result = df.rename(columns={old: new, ...})",
     "deduplicate": "result = df.drop_duplicates(subset=[...])",
-    "aggregate": "result = df.groupby([...]).agg({col: 'sum' | 'mean' | 'count' | 'min' | 'max'}).reset_index()",
+    "aggregate": "result = df.groupby(['a']).agg(b_sum=('b', 'sum'), b_avg=('b', 'mean')).reset_index()  # named aggregation; fns: sum|mean|count|min|max",
     "sort": "result = df.sort_values(by=[...], ascending=[...])",
-    "custom": "Anything pandas can express. Assign the final DataFrame to `result`.",
+    "custom": "e.g. new column: result = df.assign(c=df['a'] - df['b']). Assign the final DataFrame to `result`.",
 }
 
 _OP_HINT_POLARS: dict[str, str] = {
@@ -93,19 +93,19 @@ _OP_HINT_POLARS: dict[str, str] = {
     "deduplicate": "result = df.unique(subset=['a'])",
     "aggregate": "result = df.group_by(['a']).agg(pl.col('b').sum().alias('b_sum'))",
     "sort": "result = df.sort(['a'], descending=[False])",
-    "custom": "Anything Polars can express. Assign the final LazyFrame to `result`.",
+    "custom": "e.g. new column: result = df.with_columns((pl.col('a') - pl.col('b')).alias('c')). Only reference columns from the input schema. Assign the final LazyFrame to `result`.",
 }
 
 _OP_HINT_DUCKDB: dict[str, str] = {
     "filter": "SELECT * FROM df WHERE <predicate>",
     "select": "SELECT col1, col2 FROM df",
     "drop_nulls": "SELECT * FROM df WHERE col IS NOT NULL",
-    "fill_nulls": "SELECT *, COALESCE(col, 0) AS col_filled FROM df",
+    "fill_nulls": "SELECT * REPLACE (COALESCE(col, 0) AS col) FROM df  -- keep the original column name",
     "rename": "SELECT col AS new_name FROM df",
     "deduplicate": "SELECT DISTINCT * FROM df  -- or SELECT DISTINCT ON (cols) ...",
     "aggregate": "SELECT a, SUM(b) AS b_sum FROM df GROUP BY a",
     "sort": "SELECT * FROM df ORDER BY col [ASC|DESC]",
-    "custom": "Any valid single SELECT.",
+    "custom": "e.g. new column: SELECT *, a - b AS c FROM df",
 }
 
 _OP_HINT_BY_ENGINE: dict[EngineKind, dict[str, str]] = {
@@ -133,7 +133,9 @@ def build_prompt(
         f"User request: {user_prompt}\n\n"
         "Return only the code/SQL, no prose."
     )
-    return PromptBundle(system=system, user=user, stop=["```", "\n\n#"])
+    # No "```" stop sequence: models open with a fence, so it would end generation
+    # before any code is emitted. extract_code() strips fences instead.
+    return PromptBundle(system=system, user=user, stop=[])
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +188,7 @@ _AGG_METRIC = re.compile(
     re.IGNORECASE,
 )
 _AGG_METRIC_AS = re.compile(
-    r"(sum|mean|avg|count|min|max)\s*\(\s*([A-Za-z_]\w*)\s*\)\s+as\s+([A-Za-z_][\w\s]*)",
+    r"(sum|mean|avg|count|min|max)\s*\(\s*([A-Za-z_]\w*)\s*\)\s+as\s+([A-Za-z_]\w*)",
     re.IGNORECASE,
 )
 _AGG_METRIC_EQ = re.compile(
@@ -213,6 +215,9 @@ def _clean_metric_alias(alias_raw: str, *, source_col: str, fn_raw: str) -> str:
     - Falls back to the original source column name when alias is unclear.
     """
     alias = alias_raw.strip().lower()
+    # Alias patterns capture greedily, e.g. "and region and calculate total_revenue"
+    # before "(sum ...)"; only the last clause names the metric.
+    alias = re.split(r"\b(?:and|then|calculate|compute)\b|,", alias)[-1]
     alias = re.sub(r"^[^a-z0-9_]+", "", alias)
     alias = re.sub(
         r"^(?:and|then|calculate|compute|get|show|with|the|a|an|metric|metrics)\b[\s_]*",
@@ -338,7 +343,7 @@ def _rename(engine: EngineKind, old: str, new: str) -> str:
     if engine == "polars":
         return f"result = df.rename({{{old!r}: {new!r}}})"
     if engine == "duckdb":
-        return f"SELECT * REPLACE ({old} AS {new}) FROM df"
+        return f"SELECT * RENAME ({old} AS {new}) FROM df"
     raise ValueError(engine)
 
 
@@ -354,7 +359,7 @@ def _drop_nulls(engine: EngineKind, col: str | None) -> str:
     if engine == "duckdb":
         if col:
             return f"SELECT * FROM df WHERE {col} IS NOT NULL"
-        return "SELECT * FROM df"
+        return "SELECT * FROM df WHERE COLUMNS(*) IS NOT NULL"
     raise ValueError(engine)
 
 
@@ -369,7 +374,7 @@ def _dedup(engine: EngineKind, cols: list[str] | None) -> str:
         return "result = df.unique()"
     if engine == "duckdb":
         if cols:
-            return "SELECT DISTINCT " + ", ".join(cols) + " FROM df"
+            return "SELECT DISTINCT ON (" + ", ".join(cols) + ") * FROM df"
         return "SELECT DISTINCT * FROM df"
     raise ValueError(engine)
 

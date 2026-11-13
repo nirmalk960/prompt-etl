@@ -71,7 +71,7 @@ def ingest_to_parquet(
 
         meta = pq.read_metadata(parquet_local)
         schema = [
-            {"name": f.name, "dtype": str(f.physical_type)} for f in meta.schema
+            {"name": f.name, "dtype": str(f.type)} for f in pq.read_schema(parquet_local)
         ]
         size = os.path.getsize(parquet_local)
 

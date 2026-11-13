@@ -1,0 +1,98 @@
+{
+  "name": "Orders demo — predictions",
+  "edgeType": "smoothstep",
+  "nodes": [
+    {
+      "id": "source-ml-1",
+      "type": "source",
+      "position": { "x": 420, "y": 40 },
+      "data": { "operationId": "source", "backendKind": "source", "label": "Source", "uploadStatus": "idle", "uploadProgress": 0 }
+    },
+    {
+      "id": "fill-ml-1",
+      "type": "operation",
+      "position": { "x": 120, "y": 220 },
+      "data": {
+        "operationId": "fill_nulls",
+        "backendKind": "fill_nulls",
+        "label": "No missing discounts",
+        "mode": "configure",
+        "config": { "fills": [{ "column": "discount_amount", "method": "value", "value": "0" }] }
+      }
+    },
+    {
+      "id": "regression-ml-1",
+      "type": "operation",
+      "position": { "x": 120, "y": 400 },
+      "data": {
+        "operationId": "predict_regression",
+        "backendKind": "predict_regression",
+        "label": "Predict order total",
+        "mode": "configure",
+        "config": {
+          "target": "order_total",
+          "features": ["region", "product_category", "discount_amount"],
+          "model": "random_forest",
+          "test_size": 0.2,
+          "seed": 42,
+          "prediction_column": "predicted_total"
+        }
+      }
+    },
+    {
+      "id": "anomaly-ml-1",
+      "type": "operation",
+      "position": { "x": 420, "y": 400 },
+      "data": {
+        "operationId": "detect_anomalies",
+        "backendKind": "detect_anomalies",
+        "label": "Unusual orders",
+        "mode": "configure",
+        "config": { "features": ["order_total", "discount_amount"], "contamination": "0.05", "seed": 42 }
+      }
+    },
+    {
+      "id": "forecast-ml-1",
+      "type": "operation",
+      "position": { "x": 720, "y": 220 },
+      "data": {
+        "operationId": "forecast",
+        "backendKind": "forecast",
+        "label": "Revenue forecast",
+        "mode": "configure",
+        "config": {
+          "date_column": "order_date",
+          "value_column": "order_total",
+          "frequency": "M",
+          "aggregation": "sum",
+          "horizon": 3,
+          "method": "linear_trend"
+        }
+      }
+    },
+    {
+      "id": "write-ml-1",
+      "type": "write",
+      "position": { "x": 120, "y": 580 },
+      "data": {
+        "operationId": "write",
+        "backendKind": "write",
+        "label": "Write",
+        "writeConfig": {
+          "datasetName": "order_predictions",
+          "format": "csv",
+          "destination": "download",
+          "fileName": "order-predictions",
+          "autoExport": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e-src-fill", "source": "source-ml-1", "target": "fill-ml-1", "type": "smoothstep", "animated": true },
+    { "id": "e-fill-reg", "source": "fill-ml-1", "target": "regression-ml-1", "type": "smoothstep", "animated": true },
+    { "id": "e-fill-anom", "source": "fill-ml-1", "target": "anomaly-ml-1", "type": "smoothstep", "animated": true },
+    { "id": "e-src-fc", "source": "source-ml-1", "target": "forecast-ml-1", "type": "smoothstep", "animated": true },
+    { "id": "e-reg-write", "source": "regression-ml-1", "target": "write-ml-1", "type": "smoothstep", "animated": true }
+  ]
+}

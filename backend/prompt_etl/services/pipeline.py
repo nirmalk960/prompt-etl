@@ -27,6 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db.models import Dataset, Job
 from ..engines import EngineRouter, StepPreview
 from ..engines.base import EngineKind
+from ..dashboards.tokens import dashboard_path
+from ..ops import OpError, get_op
+from ..ops.dashboard import DASHBOARD_OP
+from ..ops.runner import run_op
 from ..schemas.pipeline import PipelineDefinition
 from . import events
 from .agent_guard import extract_code, normalize_python_result_assignment, validate
@@ -95,11 +99,15 @@ def topological_order(definition: PipelineDefinition) -> list[str]:
     return order
 
 
+_HANDLE_ORDER = {"left": 0, "right": 1}
+
+
 def parents_of(definition: PipelineDefinition) -> dict[str, list[str]]:
-    parents: dict[str, list[str]] = defaultdict(list)
-    for e in definition.edges:
-        parents[e.target].append(e.source)
-    return parents
+    """Parents per node; edges into a "left" handle come before "right"."""
+    edges: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
+    for i, e in enumerate(definition.edges):
+        edges[e.target].append((_HANDLE_ORDER.get(e.target_handle or "", 0), i, e.source))
+    return {t: [src for _, _, src in sorted(items)] for t, items in edges.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +195,12 @@ async def run_pipeline(
 
     # Decide engine.
     total_bytes = await _total_input_bytes(session, definition)
-    node_kinds = [n.kind for n in definition.nodes if n.kind not in {"source", "write"}]
+    # Configured ops always run on DuckDB or Python; only prompt steps use the
+    # routed engine, so only they inform the routing decision.
+    node_kinds = [
+        n.kind for n in definition.nodes
+        if n.kind not in {"source", "write"} and n.effective_mode == "prompt"
+    ]
     decision = router.decide(
         total_input_bytes=total_bytes,
         node_kinds=node_kinds,
@@ -302,7 +315,55 @@ async def run_pipeline(
             artifacts[nid] = artifact
             continue
 
-        # Transform node: generate code, validate, run.
+        out_key = step_checkpoint_key(workspace_id, job_id, nid)
+        spec = get_op(node.kind)
+        label = node.label or (spec.label if spec else node.kind)
+
+        if spec is not None and node.effective_mode == "configure":
+            try:
+                op_run = await run_op(spec, node.config, input_keys, out_key)
+            except OpError as e:
+                raise PipelineError(f"{label}: {e}") from e
+            artifact = StepArtifact(
+                node_id=nid,
+                object_key=op_run.result.output_object_key,
+                row_count=op_run.result.row_count,
+                byte_size=op_run.result.byte_size,
+                preview=op_run.result.preview,
+            )
+            artifacts[nid] = artifact
+            payload: dict[str, Any] = {
+                "node_id": nid,
+                "row_count": artifact.row_count,
+                "byte_size": artifact.byte_size,
+                "preview": _preview_dict(artifact.preview),
+                "code": op_run.code,
+                "engine": op_run.engine,
+                "mode": "configure",
+            }
+            if op_run.metrics:
+                payload["metrics"] = op_run.metrics
+            if spec.persist_output:
+                ds = await _materialize(
+                    session, job, artifact, name=f"{label} ({str(job.id)[:8]})"
+                )
+                payload["dataset_id"] = str(ds.id)
+                if spec.id == DASHBOARD_OP:
+                    payload["dashboard_url"] = dashboard_path(
+                        object_key=ds.parquet_object_key or artifact.object_key,
+                        config=node.config,
+                        title=(node.config.get("title") or label),
+                    )
+            await events.emit(
+                job_id=job.id, kind="step_completed", payload=payload, session=session
+            )
+            await session.commit()
+            continue
+
+        if spec is not None and not spec.supports_prompt:
+            raise PipelineError(f"{label} needs its settings filled in (it has no prompt mode)")
+
+        # Prompt node: generate code, validate, run on the routed engine.
         prompt = (node.prompt or "").strip()
         if not prompt:
             # Custom node with no prompt? Treat as passthrough.
@@ -331,7 +392,6 @@ async def run_pipeline(
                 f"for engine={decision.engine}\n--\n{code}"
             )
 
-        out_key = step_checkpoint_key(workspace_id, job_id, nid)
         result = await engine.execute_step(
             node_id=nid,
             node_kind=node.kind,
@@ -359,6 +419,7 @@ async def run_pipeline(
                 "preview": _preview_dict(artifact.preview),
                 "code": code,
                 "engine": decision.engine,
+                "mode": "prompt",
             },
             session=session,
         )
@@ -379,45 +440,54 @@ async def run_pipeline(
     if chosen is None:
         return None
 
-    # Copy the chosen checkpoint to a stable dataset key so the result outlives
-    # the job's step checkpoints (which can be GC'd).
-    new_ds_id = uuid.uuid4()
-    final_key = dataset_parquet_key(workspace_id, str(new_ds_id))
-    store = get_object_store()
-    # Use the underlying download/upload pair; cheap for typical result sizes.
-    import os
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix="prompt-etl-final-") as tmp:
-        local = os.path.join(tmp, "result.parquet")
-        store.download_to_file(chosen.object_key, local)
-        store.upload_file(local, final_key, content_type="application/octet-stream")
-
-    result_dataset = Dataset(
-        id=new_ds_id,
-        workspace_id=job.workspace_id,
-        name=f"Job {str(job.id)[:8]} result",
-        source_format="parquet",
-        raw_object_key=final_key,
-        parquet_object_key=final_key,
-        raw_size_bytes=chosen.byte_size,
-        parquet_size_bytes=chosen.byte_size,
-        row_count=chosen.row_count,
-        schema_json={"fields": chosen.preview.schema},
-        status="ready",
+    result_dataset = await _materialize(
+        session, job, chosen, name=f"Job {str(job.id)[:8]} result"
     )
-    session.add(result_dataset)
-    job.result_dataset_id = new_ds_id
+    job.result_dataset_id = result_dataset.id
     await session.commit()
 
     await events.emit(
         job_id=job.id,
         kind="result_dataset_ready",
-        payload={"dataset_id": str(new_ds_id), "row_count": chosen.row_count},
+        payload={"dataset_id": str(result_dataset.id), "row_count": chosen.row_count},
         session=session,
     )
     await session.commit()
     return result_dataset
+
+
+async def _materialize(
+    session: AsyncSession, job: Job, artifact: StepArtifact, *, name: str
+) -> Dataset:
+    """Copy a step checkpoint to a stable dataset key so it outlives the job's
+    step checkpoints (which can be GC'd), and register it as a Dataset."""
+    import os
+    import tempfile
+
+    new_ds_id = uuid.uuid4()
+    final_key = dataset_parquet_key(str(job.workspace_id), str(new_ds_id))
+    store = get_object_store()
+    with tempfile.TemporaryDirectory(prefix="prompt-etl-final-") as tmp:
+        local = os.path.join(tmp, "result.parquet")
+        store.download_to_file(artifact.object_key, local)
+        store.upload_file(local, final_key, content_type="application/octet-stream")
+
+    ds = Dataset(
+        id=new_ds_id,
+        workspace_id=job.workspace_id,
+        name=name,
+        source_format="parquet",
+        raw_object_key=final_key,
+        parquet_object_key=final_key,
+        raw_size_bytes=artifact.byte_size,
+        parquet_size_bytes=artifact.byte_size,
+        row_count=artifact.row_count,
+        schema_json={"fields": artifact.preview.schema},
+        status="ready",
+    )
+    session.add(ds)
+    await session.flush()
+    return ds
 
 
 def _preview_dict(p: StepPreview) -> dict[str, Any]:

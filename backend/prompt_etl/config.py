@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Public URL prefix the browser uses for dashboards (nginx strips /api).
+    dash_path_prefix: str = "/api/dash/"
 
     # DB
     database_url: str = (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addEdge,
   useNodesState,
@@ -11,11 +11,13 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { motion, AnimatePresence } from "framer-motion";
 
 import {
-  getOperationById,
   getReactFlowNodeType,
-  type OperationBubble,
-  type BackendKind,
+  nodeKind,
+  nodeMode,
+  visualFor,
+  type NodeMode,
 } from "@/lib/operations";
+import { defaultConfig, getOpSpec, useCatalogStore } from "@/lib/catalog";
 import {
   applyJobEvent,
   useWorkflowStore,
@@ -34,6 +36,7 @@ import {
   initUpload,
   jobEventsUrl,
   previewDataset,
+  previewPipelineSchema,
   setApiBaseUrl,
   uploadPart,
   type PipelineDefinition,
@@ -52,33 +55,41 @@ import type { WriteConfig } from "@/components/flow/WriteNode";
 
 // ---------------------------------------------------------------------------
 
-function createNodeFromOperation(
-  op: OperationBubble,
-  position: { x: number; y: number },
-): Node {
-  const flowType = getReactFlowNodeType(op);
-  const id = `${op.operationId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+function isKnownKind(kind: string): boolean {
+  return kind === "source" || kind === "write" || Boolean(getOpSpec(kind));
+}
+
+function createNodeFromOperation(kind: string, position: { x: number; y: number }): Node {
+  const spec = getOpSpec(kind);
+  const visual = visualFor(kind, spec);
+  const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const base: Node = {
     id,
-    type: flowType,
+    type: getReactFlowNodeType(kind),
     position,
     data: {
-      operationId: op.operationId,
-      backendKind: op.backendKind,
-      label: op.label,
-      color: op.color,
-      icon: op.icon,
-      prompt: op.presetPrompt,
+      operationId: kind,
+      backendKind: kind,
+      label: visual.label,
+      color: visual.color,
+      icon: visual.icon,
+      prompt: spec?.preset_prompt ?? "",
+      ...(spec
+        ? {
+            mode: spec.supports_configure ? "configure" : "prompt",
+            config: spec.supports_configure ? defaultConfig(spec) : {},
+          }
+        : {}),
     },
   };
-  if (op.operationId === "source") {
+  if (kind === "source") {
     base.data = {
       ...base.data,
       uploadStatus: "idle",
       uploadProgress: 0,
     };
   }
-  if (op.operationId === "write") {
+  if (kind === "write") {
     base.data = {
       ...base.data,
       writeConfig: {
@@ -119,13 +130,18 @@ function buildPipelineDefinition(
   enginePref: "auto" | "pandas" | "polars" | "duckdb",
 ): PipelineDefinition {
   const pNodes: PipelineNodePayload[] = nodes.map((n) => {
-    const kind = (n.data?.backendKind as BackendKind) ?? "custom";
+    const kind = nodeKind(n);
     const payload: PipelineNodePayload = {
       id: n.id,
       kind,
       label: (n.data?.label as string) ?? null,
       prompt: (n.data?.prompt as string) ?? null,
     };
+    if (kind !== "source" && kind !== "write") {
+      const mode = nodeMode(n);
+      payload.mode = mode;
+      if (mode === "configure") payload.config = (n.data?.config as Record<string, unknown>) ?? {};
+    }
     if (kind === "source") {
       payload.dataset_id = (n.data?.datasetId as string) ?? null;
     }
@@ -138,6 +154,7 @@ function buildPipelineDefinition(
   const pEdges: PipelineEdgePayload[] = edges.map((e) => ({
     source: e.source,
     target: e.target,
+    target_handle: e.targetHandle ?? null,
   }));
   return { nodes: pNodes, edges: pEdges, engine: enginePref };
 }
@@ -185,15 +202,66 @@ export default function App() {
   } = useWorkflowStore();
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+  const catalog = useCatalogStore((s) => s.catalog);
+  const loadCatalog = useCatalogStore((s) => s.load);
+  const nodeSchemas = useWorkflowStore((s) => s.nodeSchemas);
+  const setNodeSchemas = useWorkflowStore((s) => s.setNodeSchemas);
 
   useEffect(() => {
     localStorage.setItem("prompt-etl.board-name", boardName);
   }, [boardName]);
 
   useEffect(() => {
-    const preflight = preflightPipeline(nodes, edges);
+    if (backendOk) loadCatalog();
+  }, [backendOk, loadCatalog]);
+
+  // Ask the backend for each node's output columns (no data is processed).
+  // Keyed on the definition so dragging nodes around doesn't refetch.
+  const definitionKey = useMemo(
+    () => (catalog ? JSON.stringify(buildPipelineDefinition(nodes, edges, "auto")) : ""),
+    [catalog, nodes, edges],
+  );
+  useEffect(() => {
+    if (!definitionKey || !backendOk) return;
+    const definition = JSON.parse(definitionKey) as PipelineDefinition;
+    if (!definition.nodes.some((n) => n.kind === "source" && n.dataset_id)) {
+      setNodeSchemas({});
+      return;
+    }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      previewPipelineSchema(definition, ctrl.signal)
+        .then((r) => setNodeSchemas(r.nodes))
+        .catch(() => {
+          // Preview is best-effort; the run itself reports real errors.
+        });
+    }, 400);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [definitionKey, backendOk, setNodeSchemas]);
+
+  useEffect(() => {
+    const preflight = preflightPipeline(nodes, edges, nodeSchemas);
     setPreflightIssues(preflight.issues);
-  }, [nodes, edges]);
+  }, [nodes, edges, nodeSchemas, catalog]);
+
+  // Columns offered by the settings form: per input, from the predicted
+  // schema of each parent (left input first).
+  const inputColumns = useMemo<(string[] | null)[]>(() => {
+    if (!selectedNode) return [];
+    const incoming = edges
+      .filter((e) => e.target === selectedNode.id)
+      .sort((a, b) => (a.targetHandle === "right" ? 1 : 0) - (b.targetHandle === "right" ? 1 : 0));
+    return incoming.map((e) => {
+      const server = nodeSchemas[e.source]?.columns;
+      if (server) return server.map((c) => c.name);
+      const parent = nodes.find((n) => n.id === e.source);
+      const local = (parent?.data?.preview as any)?.schema as { name: string }[] | undefined;
+      return local ? local.map((c) => c.name) : null;
+    });
+  }, [selectedNode, edges, nodes, nodeSchemas]);
 
   // ---- health / ready polling --------------------------------------------
   useEffect(() => {
@@ -243,9 +311,8 @@ export default function App() {
   useEffect(() => {
     const handler = (e: Event) => {
       const { operationId, position } = (e as CustomEvent).detail;
-      const op = getOperationById(operationId);
-      if (!op) return;
-      setNodes((nds) => [...nds, createNodeFromOperation(op, position)]);
+      if (!isKnownKind(operationId)) return;
+      setNodes((nds) => [...nds, createNodeFromOperation(operationId, position)]);
     };
     window.addEventListener("prompt-etl-add-operation", handler);
     return () => window.removeEventListener("prompt-etl-add-operation", handler);
@@ -264,10 +331,9 @@ export default function App() {
 
   const onAddOperation = useCallback(
     (operationId: string) => {
-      const op = getOperationById(operationId);
-      if (!op) return;
+      if (!isKnownKind(operationId)) return;
       const position = { x: 240 + nodes.length * 36, y: 140 + nodes.length * 52 };
-      setNodes((nds) => [...nds, createNodeFromOperation(op, position)]);
+      setNodes((nds) => [...nds, createNodeFromOperation(operationId, position)]);
     },
     [nodes.length, setNodes],
   );
@@ -458,6 +524,31 @@ export default function App() {
     [setNodes],
   );
 
+  const onConfigChange = useCallback(
+    (nodeId: string, config: Record<string, unknown>) => {
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, config } } : n)),
+      );
+    },
+    [setNodes],
+  );
+
+  const onModeChange = useCallback(
+    (nodeId: string, mode: NodeMode) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          const spec = getOpSpec(nodeKind(n));
+          const cfg = (n.data?.config as Record<string, unknown>) ?? {};
+          const config =
+            mode === "configure" && spec && Object.keys(cfg).length === 0 ? defaultConfig(spec) : cfg;
+          return { ...n, data: { ...n.data, mode, config } };
+        }),
+      );
+    },
+    [setNodes],
+  );
+
   const runExport = useCallback(
     async (datasetId: string, opts?: { writeNode?: Node | null }) => {
       const writeNode =
@@ -553,7 +644,7 @@ export default function App() {
   }, [runStatus, jobId, closeSse, setRunError, setRunStatus]);
 
   const handleRun = useCallback(async () => {
-    const preflight = preflightPipeline(nodes, edges);
+    const preflight = preflightPipeline(nodes, edges, nodeSchemas);
     setPreflightIssues(preflight.issues);
     if (!preflight.ok) {
       const first = preflight.issues[0];
@@ -569,13 +660,13 @@ export default function App() {
       alert("Add a Source node and upload a file first.");
       return;
     }
-    const opNodes = nodes.filter((n) => n.type === "operation");
+    const opNodes = nodes.filter((n) => n.type !== "source" && n.type !== "write");
     if (!opNodes.length) {
       alert("Add at least one operation.");
       return;
     }
     const missingPrompt = opNodes.find(
-      (n) => !((n.data?.prompt as string) || "").trim(),
+      (n) => nodeMode(n) === "prompt" && !((n.data?.prompt as string) || "").trim(),
     );
     if (missingPrompt) {
       alert(`Add a prompt for "${missingPrompt.data?.label}".`);
@@ -662,6 +753,7 @@ export default function App() {
   }, [
     nodes,
     edges,
+    nodeSchemas,
     enginePref,
     closeSse,
     resetRun,
@@ -876,6 +968,9 @@ export default function App() {
               <InspectorPanel
                 selectedNode={selectedNode}
                 onPromptChange={onPromptChange}
+                onConfigChange={onConfigChange}
+                onModeChange={onModeChange}
+                inputColumns={inputColumns}
                 preflightIssues={preflightIssues}
               />
             </div>

@@ -1,0 +1,84 @@
+{
+  "name": "Orders demo — revenue by region (no AI)",
+  "edgeType": "smoothstep",
+  "nodes": [
+    {
+      "id": "source-demo-1",
+      "type": "source",
+      "position": { "x": 120, "y": 200 },
+      "data": { "operationId": "source", "backendKind": "source", "label": "Source", "uploadStatus": "idle", "uploadProgress": 0 }
+    },
+    {
+      "id": "filter-demo-1",
+      "type": "operation",
+      "position": { "x": 420, "y": 200 },
+      "data": {
+        "operationId": "filter",
+        "backendKind": "filter",
+        "label": "Orders over 50",
+        "mode": "configure",
+        "config": {
+          "conditions": [{ "column": "order_total", "operator": ">", "value": "50" }],
+          "match": "all"
+        },
+        "prompt": "Filter rows where order_total is greater than 50"
+      }
+    },
+    {
+      "id": "aggregate-demo-1",
+      "type": "operation",
+      "position": { "x": 720, "y": 200 },
+      "data": {
+        "operationId": "aggregate",
+        "backendKind": "aggregate",
+        "label": "Revenue by region",
+        "mode": "configure",
+        "config": {
+          "group_by": ["region"],
+          "metrics": [
+            { "function": "sum", "column": "order_total", "alias": "total_revenue" },
+            { "function": "avg", "column": "order_total", "alias": "avg_order_value" },
+            { "function": "count", "alias": "orders" }
+          ]
+        },
+        "prompt": "Group by region and calculate sum(order_total) as total_revenue, avg(order_total) as avg_order_value"
+      }
+    },
+    {
+      "id": "sort-demo-1",
+      "type": "operation",
+      "position": { "x": 1020, "y": 200 },
+      "data": {
+        "operationId": "sort",
+        "backendKind": "sort",
+        "label": "Highest revenue first",
+        "mode": "configure",
+        "config": { "sorts": [{ "column": "total_revenue", "direction": "desc", "nulls": "last" }] },
+        "prompt": "Sort by total_revenue descending"
+      }
+    },
+    {
+      "id": "write-demo-1",
+      "type": "write",
+      "position": { "x": 1320, "y": 200 },
+      "data": {
+        "operationId": "write",
+        "backendKind": "write",
+        "label": "Write",
+        "writeConfig": {
+          "datasetName": "revenue_by_region",
+          "format": "csv",
+          "destination": "download",
+          "fileName": "revenue-by-region",
+          "autoExport": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e-source-filter", "source": "source-demo-1", "target": "filter-demo-1", "type": "smoothstep", "animated": true },
+    { "id": "e-filter-aggregate", "source": "filter-demo-1", "target": "aggregate-demo-1", "type": "smoothstep", "animated": true },
+    { "id": "e-aggregate-sort", "source": "aggregate-demo-1", "target": "sort-demo-1", "type": "smoothstep", "animated": true },
+    { "id": "e-sort-write", "source": "sort-demo-1", "target": "write-demo-1", "type": "smoothstep", "animated": true }
+  ]
+}

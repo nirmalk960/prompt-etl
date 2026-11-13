@@ -17,6 +17,16 @@ export interface StepState {
   rowCount?: number;
   byteSize?: number;
   error?: string | null;
+  engine?: string | null;           // duckdb | python | pandas | polars
+  mode?: "configure" | "prompt" | null;
+  metrics?: Record<string, any> | null;
+  dashboardPath?: string | null;    // relative to the API base
+  datasetId?: string | null;        // saved output of prediction/dashboard steps
+}
+
+export interface NodeSchemaInfo {
+  columns: { name: string; dtype: string }[] | null;
+  error: string | null;
 }
 
 export type RunStatus = "idle" | "running" | "success" | "error";
@@ -35,6 +45,10 @@ interface State {
 
   // Source upload state (per source node, keyed by reactflow node id)
   preview: PreviewData | null;       // first uploaded source preview (for empty inspector)
+
+  // Predicted output columns per node (POST /pipelines/schema)
+  nodeSchemas: Record<string, NodeSchemaInfo>;
+  setNodeSchemas: (s: Record<string, NodeSchemaInfo>) => void;
 
   // UI
   selectedNodeId: string | null;
@@ -69,6 +83,9 @@ export const useWorkflowStore = create<State>((set) => ({
   resultPreview: null,
 
   preview: null,
+
+  nodeSchemas: {},
+  setNodeSchemas: (nodeSchemas) => set({ nodeSchemas }),
 
   selectedNodeId: null,
   edgeType: "smoothstep",
@@ -180,6 +197,11 @@ export function applyJobEvent(
           generatedCode: payload.code ?? null,
           rowCount: payload.row_count,
           byteSize: payload.byte_size,
+          engine: payload.engine ?? null,
+          mode: payload.mode ?? null,
+          metrics: payload.metrics ?? null,
+          dashboardPath: payload.dashboard_url ?? null,
+          datasetId: payload.dataset_id ?? null,
         });
       }
       return false;

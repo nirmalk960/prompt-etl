@@ -23,6 +23,7 @@ import { WriteNode, type WriteConfig } from "./WriteNode";
 const nodeTypes = {
   source: SourceNode,
   operation: OperationNode,
+  dashboard: OperationNode,
   write: WriteNode,
 };
 
@@ -175,7 +176,8 @@ export function FlowCanvas({
                 </h3>
                 <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                   Drag an operation from the bar above onto this canvas, or click any bubble
-                  to add it. Build pipelines step by step in plain English.
+                  to add it. Fill in each box's settings, or describe the step in plain
+                  English with a prompt.
                 </p>
               </div>
             </motion.div>

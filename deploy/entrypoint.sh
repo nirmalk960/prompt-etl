@@ -16,6 +16,16 @@ PGDB="${POSTGRES_DB:-prompt_etl}"
 mkdir -p /data/objects /data/redis /run/postgresql
 chown -R postgres:postgres /run/postgresql
 
+# Signing key for dashboard links: generated once, kept on the volume so
+# links survive restarts. An explicit SECRET_KEY env var wins.
+if [ -z "${SECRET_KEY:-}" ]; then
+  if [ ! -s /data/secret_key ]; then
+    (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /data/secret_key)
+  fi
+  SECRET_KEY=$(cat /data/secret_key)
+  export SECRET_KEY
+fi
+
 # ---------------------------------------------------------------------------
 # RAM detection (mirrors backend/prompt_etl/engines/resources.py)
 # ---------------------------------------------------------------------------

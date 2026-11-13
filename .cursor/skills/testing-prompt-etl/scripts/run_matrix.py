@@ -34,8 +34,8 @@ from xml.sax.saxutils import escape
 
 ENGINES = ("pandas", "polars", "duckdb")
 CATEGORIES = (
-    "platform", "ingest", "ops", "chains", "export", "routing",
-    "validation", "lifecycle", "llm", "scale", "persistence",
+    "platform", "ingest", "ops", "chains", "configure", "preflight", "ml", "dashboard",
+    "export", "routing", "validation", "lifecycle", "llm", "scale", "persistence",
 )
 COLUMNS = [
     "order_id", "customer_id", "order_status", "order_date",
@@ -848,6 +848,420 @@ def _llm_for(engine: str) -> None:
             "Group by region and calculate total_revenue as the sum of order_total and avg_order_value as the average of order_total")],
             engine, timeout=ctx.args.llm_timeout)
         assert {"region", "total_revenue"} <= headers_of(out), f"columns {sorted(headers_of(out))}"
+
+
+# ---- configured operations (no LLM) -----------------------------------------
+
+def cfg_pipeline(dataset_id: str, steps: list[tuple[str, dict]]) -> tuple[list[dict], list[dict]]:
+    nodes = [{"id": "s0", "kind": "source", "label": "source", "dataset_id": dataset_id}]
+    for i, (kind, config) in enumerate(steps, start=1):
+        nodes.append({"id": f"n{i}", "kind": kind, "label": kind, "mode": "configure", "config": config})
+    nodes.append({"id": "w0", "kind": "write", "label": "write"})
+    edges = [{"source": nodes[i]["id"], "target": nodes[i + 1]["id"]} for i in range(len(nodes) - 1)]
+    return nodes, edges
+
+
+def step_events(detail: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {e["payload"]["node_id"]: e["payload"] for e in detail.get("events", [])
+            if e.get("kind") == "step_completed"}
+
+
+def run_cfg(ctx: Ctx, steps: list[tuple[str, dict]], dataset_id: str | None = None,
+            nodes_edges: tuple[list[dict], list[dict]] | None = None) -> tuple[dict, list[dict[str, str]]]:
+    nodes, edges = nodes_edges or cfg_pipeline(dataset_id or ctx.require("csv_dataset"), steps)
+    detail = wait_job(ctx.api, submit(ctx.api, nodes, edges, "auto"), ctx.args.job_timeout)
+    if detail["status"] != "succeeded":
+        raise AssertionError(f"job {detail['status']}: {detail.get('error')}")
+    for nid, ev in step_events(detail).items():
+        if nid.startswith("n"):
+            assert ev.get("mode") == "configure", f"{nid} ran in mode {ev.get('mode')}"
+            assert ev.get("engine") in ("duckdb", "python"), f"{nid} engine {ev.get('engine')}"
+    return detail, export_rows(ctx.api, detail["result_dataset_id"])
+
+
+def run_cfg_fail(ctx: Ctx, steps: list[tuple[str, dict]]) -> str:
+    nodes, edges = cfg_pipeline(ctx.require("csv_dataset"), steps)
+    detail = wait_job(ctx.api, submit(ctx.api, nodes, edges, "auto"), ctx.args.job_timeout)
+    assert detail["status"] == "failed", f"job {detail['status']} (should fail)"
+    return detail.get("error") or ""
+
+
+def cond(column: str, operator: str, value: Any = None, value2: Any = None) -> dict:
+    out: dict[str, Any] = {"column": column, "operator": operator}
+    if value is not None:
+        out["value"] = value
+    if value2 is not None:
+        out["value2"] = value2
+    return out
+
+
+@test("configure", "operation catalog is served")
+def _(ctx: Ctx):
+    cat = ctx.api.json("GET", "/operations")
+    ids = {o["id"] for o in cat["operations"]}
+    for legacy in ("filter", "select", "drop_nulls", "fill_nulls", "rename", "deduplicate", "aggregate", "sort", "custom"):
+        assert legacy in ids, f"legacy op {legacy} missing"
+    for new in ("join", "pivot", "window", "predict_regression", "forecast", "dashboard"):
+        assert new in ids, f"op {new} missing"
+    return f"{len(ids)} operations in {len(cat['categories'])} categories"
+
+
+@test("configure", "filter AND conditions")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [("filter", {"conditions": [cond("region", "=", "EU"), cond("order_total", ">", "50")],
+                                       "match": "all"})])
+    exp = sum(1 for r in ctx.rows if r["region"] == "EU" and r["order_total"] > 50)
+    assert len(out) == exp, f"{len(out)} rows, expected {exp}"
+
+
+@test("configure", "filter OR / in list / is empty")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [("filter", {"conditions": [cond("region", "in", "EU, US"),
+                                                      cond("discount_amount", "is_null")], "match": "any"})])
+    exp = sum(1 for r in ctx.rows if r["region"] in ("EU", "US") or r["discount_amount"] is None)
+    assert len(out) == exp, f"{len(out)} rows, expected {exp}"
+
+
+@test("configure", "text value against numeric column is rejected")
+def _(ctx: Ctx):
+    err = run_cfg_fail(ctx, [("filter", {"conditions": [cond("order_total", ">", "lots")]})])
+    assert "numeric" in err, err
+    return err[:100]
+
+
+@test("configure", "select / drop / rename columns")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [
+        ("select", {"columns": ["order_id", "region", "order_total", "discount_amount"]}),
+        ("drop_columns", {"columns": ["discount_amount"]}),
+        ("rename", {"renames": [{"from": "order_total", "to": "amount"}]}),
+    ])
+    assert list(out[0].keys()) == ["order_id", "region", "amount"], f"columns {list(out[0].keys())}"
+    assert len(out) == len(ctx.rows)
+
+
+@test("configure", "formula + conditional column")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [
+        ("fill_nulls", {"fills": [{"column": "discount_amount", "method": "value", "value": "0"}]}),
+        ("formula", {"new_column": "net_total", "expression": "order_total - discount_amount"}),
+        ("conditional_column", {"new_column": "size",
+                                "rules": [{**cond("order_total", ">=", "100"), "then": "big"}],
+                                "else_value": "small"}),
+    ])
+    for r in out:
+        t, d, n = num(r["order_total"]), num(r["discount_amount"]), num(r["net_total"])
+        assert close(n, t - d), f"net_total {n} != {t} - {d}"
+        assert r["size"] == ("big" if t >= 100 else "small"), f"size {r['size']} for {t}"
+
+
+@test("configure", "fill nulls with mean")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [("fill_nulls", {"fills": [{"column": "discount_amount", "method": "mean"}]})])
+    vals = [r["discount_amount"] for r in ctx.rows if r["discount_amount"] is not None]
+    mean = sum(vals) / len(vals)
+    filled = [num(r["discount_amount"]) for r, src in zip(out, ctx.rows) if src["discount_amount"] is None]
+    assert filled and all(close(v, mean) for v in filled), f"filled {filled[:3]} expected {mean:.3f}"
+
+
+@test("configure", "deduplicate on key + sort + top N")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [
+        ("deduplicate", {"columns": ["order_id"]}),
+        ("top_n", {"count": 5, "order_by": "order_total", "direction": "desc"}),
+    ])
+    exp = sorted({r["order_id"]: r["order_total"] for r in ctx.rows}.values(), reverse=True)[:5]
+    got = [num(r["order_total"]) for r in out]
+    assert len(out) == 5 and all(close(a, b) for a, b in zip(got, exp)), f"{got} != {exp}"
+
+
+@test("configure", "aggregate with aliases, sorted")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [
+        ("aggregate", {"group_by": ["region"], "metrics": [
+            {"function": "sum", "column": "order_total", "alias": "total_revenue"},
+            {"function": "count", "alias": "orders"}]}),
+        ("sort", {"sorts": [{"column": "total_revenue", "direction": "desc"}]}),
+    ])
+    exp = group_expect(ctx.rows, "region", "order_total", "sum")
+    vals = [num(r["total_revenue"]) for r in out]
+    assert vals == sorted(vals, reverse=True), "not sorted"
+    for r in out:
+        assert close(num(r["total_revenue"]), exp[r["region"]]), f"{r['region']} revenue wrong"
+        assert int(r["orders"]) == sum(1 for x in ctx.rows if x["region"] == r["region"])
+
+
+@test("configure", "date parts -> monthly totals")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [
+        ("date_parts", {"column": "order_date", "parts": ["year_month"]}),
+        ("aggregate", {"group_by": ["order_date_year_month"],
+                       "metrics": [{"function": "sum", "column": "order_total", "alias": "revenue"}]}),
+    ])
+    assert len(out) == 12, f"{len(out)} months"
+    assert all(len(r["order_date_year_month"]) == 7 for r in out)
+    assert close(sum(num(r["revenue"]) for r in out), sum(r["order_total"] for r in ctx.rows), tol=0.5)
+
+
+@test("configure", "pivot regions x status")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [("pivot", {"index": ["region"], "pivot_column": "order_status",
+                                      "value_column": "order_total", "function": "sum"})])
+    assert len(out) == 4, f"{len(out)} rows"
+    assert {"completed", "pending"} <= headers_of(out), f"columns {sorted(headers_of(out))}"
+
+
+@test("configure", "window running total")
+def _(ctx: Ctx):
+    _, out = run_cfg(ctx, [("window", {"function": "running_sum", "column": "order_total",
+                                       "order_by": "order_id", "new_column": "running"})])
+    last = max(out, key=lambda r: num(r["running"]))
+    assert close(num(last["running"]), sum(r["order_total"] for r in ctx.rows), tol=0.5)
+
+
+@test("configure", "profile + validate (flag)")
+def _(ctx: Ctx):
+    _, prof = run_cfg(ctx, [("profile", {})])
+    by_col = {r["column_name"]: r for r in prof}
+    assert set(COLUMNS) <= set(by_col), f"profiled {sorted(by_col)}"
+    assert int(by_col["discount_amount"]["null_count"]) == sum(1 for r in ctx.rows if r["discount_amount"] is None)
+    _, out = run_cfg(ctx, [("validate", {"rules": [{"column": "discount_amount", "check": "not_null"}],
+                                         "on_fail": "flag"})])
+    bad = sum(1 for r in out if r["_valid"].lower() == "false")
+    assert bad == sum(1 for r in ctx.rows if r["discount_amount"] is None), f"{bad} invalid rows"
+
+
+@test("configure", "validate (fail) stops the pipeline")
+def _(ctx: Ctx):
+    err = run_cfg_fail(ctx, [("validate", {"rules": [{"column": "discount_amount", "check": "not_null"}],
+                                            "on_fail": "fail"})])
+    assert "validation failed" in err, err
+    return err[:100]
+
+
+@test("configure", "join orders with a lookup table (left/right inputs)")
+def _(ctx: Ctx):
+    lookup = b"region,manager\nEU,Anna\nUS,Bob\nAPAC,Chen\n"
+    lk = upload(ctx.api, "matrix_regions.csv", "csv", lookup)
+    wait_dataset(ctx.api, lk, ctx.args.ingest_timeout)
+    nodes = [
+        {"id": "s0", "kind": "source", "dataset_id": ctx.require("csv_dataset")},
+        {"id": "s1", "kind": "source", "dataset_id": lk},
+        {"id": "n1", "kind": "join", "mode": "configure",
+         "config": {"how": "left", "keys": [{"left": "region", "right": "region"}]}},
+        {"id": "w0", "kind": "write"},
+    ]
+    edges = [{"source": "s1", "target": "n1", "target_handle": "right"},
+             {"source": "s0", "target": "n1", "target_handle": "left"},
+             {"source": "n1", "target": "w0"}]
+    _, out = run_cfg(ctx, [], nodes_edges=(nodes, edges))
+    assert len(out) == len(ctx.rows), f"{len(out)} rows (left join must keep all)"
+    managers = {"EU": "Anna", "US": "Bob", "APAC": "Chen", "LATAM": ""}
+    assert all(r["manager"] == managers[r["region"]] for r in out), "wrong manager mapping"
+
+
+@test("configure", "union of two branches")
+def _(ctx: Ctx):
+    ds = ctx.require("csv_dataset")
+    nodes = [
+        {"id": "s0", "kind": "source", "dataset_id": ds},
+        {"id": "n1", "kind": "filter", "mode": "configure", "config": {"conditions": [cond("region", "=", "EU")]}},
+        {"id": "n2", "kind": "filter", "mode": "configure", "config": {"conditions": [cond("region", "=", "US")]}},
+        {"id": "n3", "kind": "union", "mode": "configure", "config": {}},
+        {"id": "w0", "kind": "write"},
+    ]
+    edges = [{"source": "s0", "target": "n1"}, {"source": "s0", "target": "n2"},
+             {"source": "n1", "target": "n3", "target_handle": "left"},
+             {"source": "n2", "target": "n3", "target_handle": "right"},
+             {"source": "n3", "target": "w0"}]
+    _, out = run_cfg(ctx, [], nodes_edges=(nodes, edges))
+    assert len(out) == sum(1 for r in ctx.rows if r["region"] in ("EU", "US")), f"{len(out)} rows"
+
+
+@test("configure", "demo chain: filter -> aggregate -> sort (no LLM)")
+def _(ctx: Ctx):
+    t0 = time.time()
+    _, out = run_cfg(ctx, [
+        ("filter", {"conditions": [cond("order_total", ">", "50")]}),
+        ("aggregate", {"group_by": ["region"], "metrics": [
+            {"function": "sum", "column": "order_total", "alias": "total_revenue"},
+            {"function": "avg", "column": "order_total", "alias": "avg_order_value"}]}),
+        ("sort", {"sorts": [{"column": "total_revenue", "direction": "desc"}]}),
+    ])
+    kept = [r for r in ctx.rows if r["order_total"] > 50]
+    exp = group_expect(kept, "region", "order_total", "sum")
+    for r in out:
+        assert close(num(r["total_revenue"]), exp[r["region"]]), f"{r['region']} revenue wrong"
+    return f"{time.time() - t0:.1f}s end to end"
+
+
+# ---- preflight schema endpoint ---------------------------------------------
+
+@test("preflight", "predicts output columns without running")
+def _(ctx: Ctx):
+    nodes, edges = cfg_pipeline(ctx.require("csv_dataset"), [
+        ("aggregate", {"group_by": ["region"], "metrics": [
+            {"function": "sum", "column": "order_total", "alias": "total_revenue"}]}),
+        ("predict_regression", {"target": "total_revenue"}),
+    ])
+    r = ctx.api.json("POST", "/pipelines/schema", {"nodes": nodes, "edges": edges})["nodes"]
+    assert [c["name"] for c in r["n1"]["columns"]] == ["region", "total_revenue"], r["n1"]
+    assert [c["name"] for c in r["n2"]["columns"]][-2:] == ["prediction", "split"], r["n2"]
+    assert r["w0"]["columns"] == r["n2"]["columns"]
+
+
+@test("preflight", "reports unknown columns per node")
+def _(ctx: Ctx):
+    nodes, edges = cfg_pipeline(ctx.require("csv_dataset"), [
+        ("filter", {"conditions": [cond("no_such_column", "=", "x")]}),
+    ])
+    r = ctx.api.json("POST", "/pipelines/schema", {"nodes": nodes, "edges": edges})["nodes"]
+    assert r["n1"]["error"] and "no_such_column" in r["n1"]["error"], r["n1"]
+    assert r["w0"]["columns"] is None
+    return r["n1"]["error"][:100]
+
+
+@test("preflight", "prompt steps are unknown until run")
+def _(ctx: Ctx):
+    nodes, edges = linear(ctx.require("csv_dataset"), [("custom", "add a column")])
+    r = ctx.api.json("POST", "/pipelines/schema", {"nodes": nodes, "edges": edges})["nodes"]
+    assert r["s0"]["columns"] and r["n1"]["columns"] is None and r["n1"]["error"] is None, r
+
+
+# ---- prediction --------------------------------------------------------------
+
+def _ml_dataset(ctx: Ctx) -> str:
+    if "ml_dataset" in ctx.state:
+        return ctx.state["ml_dataset"]
+    lines = ["x1,x2,segment,y,label"]
+    for i in range(300):
+        x1, x2 = (i * 37) % 101, (i * 13) % 17
+        seg = ("a", "b", "c")[i % 3]
+        y = 3 * x1 - 2 * x2 + (10 if seg == "a" else 0) + 5
+        label = "high" if x1 + x2 > 60 else "low"
+        lines.append(f"{x1},{x2},{seg},{y},{label}")
+    ds = upload(ctx.api, "matrix_ml.csv", "csv", ("\n".join(lines) + "\n").encode())
+    wait_dataset(ctx.api, ds, ctx.args.ingest_timeout)
+    ctx.state["ml_dataset"] = ds
+    return ds
+
+
+def _ml_step(ctx: Ctx, kind: str, config: dict, dataset_id: str) -> tuple[dict, list[dict[str, str]]]:
+    detail, out = run_cfg(ctx, [(kind, config)], dataset_id=dataset_id)
+    ev = step_events(detail)["n1"]
+    assert ev.get("metrics"), "no metrics in step_completed"
+    assert ev.get("dataset_id"), "prediction output was not saved as a dataset"
+    return ev["metrics"], out
+
+
+@test("ml", "regression (linear) recovers the formula")
+def _(ctx: Ctx):
+    m, out = _ml_step(ctx, "predict_regression", {"target": "y", "features": ["x1", "x2", "segment"],
+                                                  "model": "linear"}, _ml_dataset(ctx))
+    assert m["r2"] > 0.999, f"r2={m['r2']}"
+    assert {"prediction", "split"} <= headers_of(out)
+    return f"r2={m['r2']} rmse={m['rmse']}"
+
+
+@test("ml", "regression (random forest) on orders")
+def _(ctx: Ctx):
+    m, _ = _ml_step(ctx, "predict_regression", {"target": "order_total", "features": ["region", "order_status"]},
+                    ctx.require("csv_dataset"))
+    assert "r2" in m and m["importance"], m
+    return f"r2={m['r2']}"
+
+
+@test("ml", "classification")
+def _(ctx: Ctx):
+    m, out = _ml_step(ctx, "predict_class", {"target": "label", "features": ["x1", "x2"], "model": "decision_tree"},
+                      _ml_dataset(ctx))
+    assert m["accuracy"] > 0.9, f"accuracy={m['accuracy']}"
+    assert all(0 <= num(r["probability"]) <= 1 for r in out)
+    return f"accuracy={m['accuracy']} f1={m['f1']}"
+
+
+@test("ml", "clustering")
+def _(ctx: Ctx):
+    m, out = _ml_step(ctx, "cluster", {"k": 3, "features": ["x1", "x2"]}, _ml_dataset(ctx))
+    assert sum(m["sizes"].values()) == 300 and len(m["sizes"]) == 3, m["sizes"]
+    assert {r["cluster"] for r in out} == {"0", "1", "2"}
+    return f"silhouette={m['silhouette']}"
+
+
+@test("ml", "anomaly detection")
+def _(ctx: Ctx):
+    m, out = _ml_step(ctx, "detect_anomalies", {"features": ["order_total"], "contamination": "0.05"},
+                      ctx.require("csv_dataset"))
+    flagged = sum(1 for r in out if r["is_anomaly"].lower() == "true")
+    assert flagged == m["anomalies"] and 0 < flagged < len(out) * 0.1, f"{flagged} flagged"
+    return f"{flagged} anomalies"
+
+
+@test("ml", "monthly forecast")
+def _(ctx: Ctx):
+    m, out = _ml_step(ctx, "forecast", {"date_column": "order_date", "value_column": "order_total",
+                                        "frequency": "M", "horizon": 3, "method": "linear_trend"},
+                      ctx.require("csv_dataset"))
+    fc = [r for r in out if r["series"] == "forecast"]
+    assert len(fc) == 3 and m["history_periods"] == 12, f"{len(fc)} forecast rows, history={m['history_periods']}"
+    return f"mape={m['mape_pct']}%"
+
+
+@test("ml", "prediction ops ignore prompt mode (always configured)")
+def _(ctx: Ctx):
+    nodes, edges = linear(ctx.require("csv_dataset"), [("cluster", "")])
+    nodes[1]["mode"] = "prompt"
+    detail = wait_job(ctx.api, submit(ctx.api, nodes, edges, "auto"), ctx.args.job_timeout)
+    # Python ops always run configured; empty config uses defaults (k=3, all usable columns).
+    assert detail["status"] == "succeeded", f"{detail['status']}: {detail.get('error')}"
+
+
+# ---- dashboard ---------------------------------------------------------------
+
+def _dash_url(ctx: Ctx) -> str:
+    if "dash_url" in ctx.state:
+        return ctx.state["dash_url"]
+    detail, _ = run_cfg(ctx, [("dashboard", {"title": "Matrix orders", "pie_column": "region",
+                                             "line_x": "order_date", "line_y": "order_total"})])
+    ev = step_events(detail)["n1"]
+    assert ev.get("dashboard_url", "").startswith("/dash/?token="), f"dashboard_url={ev.get('dashboard_url')}"
+    assert ev.get("dataset_id"), "dashboard data not saved"
+    ctx.state["dash_url"] = ev["dashboard_url"]
+    return ev["dashboard_url"]
+
+
+@test("dashboard", "dashboard step emits a signed link")
+def _(ctx: Ctx):
+    return _dash_url(ctx)[:40] + "…"
+
+
+@test("dashboard", "link opens without login; tampered link is 403")
+def _(ctx: Ctx):
+    url = ctx.api.base + _dash_url(ctx)
+    status, _, body = ctx.api.request("GET", url, auth=False)
+    assert status == 200 and b"_dash-config" in body, f"dashboard page -> {status}"
+    assert b"/api/dash/" in body or b"/dash/" in body
+    bad = url[:-3] + ("AAA" if not url.endswith("AAA") else "BBB")
+    assert ctx.api.request("GET", bad, auth=False)[0] == 403, "tampered token accepted"
+    assert ctx.api.request("GET", ctx.api.base + "/dash/", auth=False)[0] == 403, "missing token accepted"
+
+
+@test("dashboard", "dashboard renders data (Dash callback)")
+def _(ctx: Ctx):
+    path = _dash_url(ctx)
+    search = path[path.index("?"):]
+    body = {
+        "output": "page.children",
+        "outputs": {"id": "page", "property": "children"},
+        "inputs": [{"id": "url", "property": "search", "value": search}],
+        "changedPropIds": ["url.search"],
+    }
+    status, _, payload = ctx.api.request("POST", ctx.api.base + "/dash/_dash-update-component", body=body, auth=False)
+    assert status == 200, f"callback -> {status}: {payload[:200]!r}"
+    text = payload.decode()
+    assert "Matrix orders" in text and f"{len(ctx.rows):,}" in text, "title/row count missing"
+    for chart in ("fig-histogram", "fig-pie", "fig-line", "table"):
+        assert chart in text, f"{chart} missing"
 
 
 # ---- scale (opt-in) -----------------------------------------------------------

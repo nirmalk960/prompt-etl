@@ -1,4 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
+import { getOpSpec, missingParams } from "./catalog";
+import { nodeKind, nodeMode } from "./operations";
+import type { NodeSchemaInfo } from "@/stores/workflowStore";
 
 export interface PreflightIssue {
   nodeId: string;
@@ -192,7 +195,11 @@ function requireColumns(
   return { missing, resolved };
 }
 
-export function preflightPipeline(nodes: Node[], edges: Edge[]): PreflightResult {
+export function preflightPipeline(
+  nodes: Node[],
+  edges: Edge[],
+  serverSchemas: Record<string, NodeSchemaInfo> = {},
+): PreflightResult {
   const issues: PreflightIssue[] = [];
   const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
   const parents = new Map<string, string[]>();
@@ -220,12 +227,13 @@ export function preflightPipeline(nodes: Node[], edges: Edge[]): PreflightResult
     };
   }
 
-  const schemaByNode = new Map<string, string[]>();
+  // null = columns unknown until the pipeline runs (pivot, prompt steps, ...)
+  const schemaByNode = new Map<string, string[] | null>();
 
   for (const id of order) {
     const node = nodeById[id];
     if (!node) continue;
-    const kind = (node.data?.backendKind as string) ?? "custom";
+    const kind = nodeKind(node);
     const label = (node.data?.label as string) || id;
     const prompt = ((node.data?.prompt as string) || "").trim();
 
@@ -256,15 +264,48 @@ export function preflightPipeline(nodes: Node[], edges: Edge[]): PreflightResult
       schemaByNode.set(id, []);
       continue;
     }
+    const parentCols = p.map((parentId) => schemaByNode.get(parentId) ?? null);
+    const known = parentCols.every((c) => c !== null);
     const inputCols = Array.from(
-      new Set(
-        p.flatMap((parentId) => schemaByNode.get(parentId) ?? []).map((c) => c.trim()),
-      ),
+      new Set(parentCols.flatMap((c) => c ?? []).map((c) => c.trim())),
     );
-    let outCols = [...inputCols];
+    let outCols: string[] | null = known ? [...inputCols] : null;
 
     if (kind === "write") {
       schemaByNode.set(id, outCols);
+      continue;
+    }
+
+    const spec = getOpSpec(kind);
+    if (spec && nodeMode(node, spec) === "configure") {
+      if (spec.inputs === 2 && p.length !== 2) {
+        issues.push({
+          nodeId: id,
+          label,
+          message: `Cannot execute: ${spec.label} needs two inputs.`,
+          suggestion: "Connect one step to the 'left' input and one to the 'right' input.",
+        });
+      }
+      const missing = missingParams(spec, (node.data?.config as Record<string, unknown>) ?? {});
+      if (missing.length) {
+        issues.push({
+          nodeId: id,
+          label,
+          message: `Cannot execute: fill in ${missing.join(", ")}.`,
+        });
+      }
+      const server = serverSchemas[id];
+      if (server?.error && !missing.length) {
+        issues.push({ nodeId: id, label, message: `Cannot execute: ${server.error}` });
+      }
+      schemaByNode.set(id, server?.columns ? server.columns.map((c) => c.name) : null);
+      continue;
+    }
+
+    if (!known) {
+      // Columns upstream are unknown: only check that a prompt exists.
+      if (!prompt) issues.push({ nodeId: id, label, message: "Cannot execute: prompt is empty." });
+      schemaByNode.set(id, null);
       continue;
     }
 

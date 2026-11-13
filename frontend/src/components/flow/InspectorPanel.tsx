@@ -8,26 +8,43 @@ import {
   Workflow,
   ShieldAlert,
   Cpu,
+  SlidersHorizontal,
+  ExternalLink,
+  Columns3,
 } from "lucide-react";
-import { getOperationById } from "@/lib/operations";
+import { nodeKind, nodeMode, visualFor, type NodeMode } from "@/lib/operations";
+import { useOpSpec } from "@/lib/catalog";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useWorkflowStore } from "@/stores/workflowStore";
-import { hexToRgba } from "@/lib/utils";
+import { cn, hexToRgba } from "@/lib/utils";
 import type { PreflightIssue } from "@/lib/preflight";
+import { dashboardUrl } from "@/api/client";
 import { SchemaPanel } from "./SchemaPanel";
+import { OpConfigForm } from "./OpConfigForm";
+import { MetricsPanel } from "./MetricsPanel";
 
 interface InspectorPanelProps {
   selectedNode: Node | null;
   onPromptChange: (nodeId: string, prompt: string) => void;
+  onConfigChange: (nodeId: string, config: Record<string, unknown>) => void;
+  onModeChange: (nodeId: string, mode: NodeMode) => void;
+  /** Columns available to the selected node, per input; null = unknown. */
+  inputColumns: (string[] | null)[];
   preflightIssues: PreflightIssue[];
 }
 
 export function InspectorPanel({
   selectedNode,
   onPromptChange,
+  onConfigChange,
+  onModeChange,
+  inputColumns,
   preflightIssues,
 }: InspectorPanelProps) {
+  const kind = selectedNode ? nodeKind(selectedNode) : "";
+  const spec = useOpSpec(kind);
+  const predicted = useWorkflowStore((s) => (selectedNode ? s.nodeSchemas[selectedNode.id] : undefined));
   const {
     resultPreview,
     preview,
@@ -109,14 +126,17 @@ export function InspectorPanel({
     );
   }
 
-  const op = getOperationById((selectedNode.data?.operationId as string) ?? "");
-  const color = (selectedNode.data?.color as string) || op?.color || "#a78bfa";
-  const icon = (selectedNode.data?.icon as string) || op?.icon || "✨";
-  const label = (selectedNode.data?.label as string) || op?.label || String(selectedNode.type);
+  const visual = visualFor(kind, spec);
+  const color = (selectedNode.data?.color as string) || visual.color;
+  const icon = visual.icon;
+  const label = (selectedNode.data?.label as string) || visual.label;
   const promptValue = (selectedNode.data?.prompt as string) ?? "";
+  const config = (selectedNode.data?.config as Record<string, unknown>) ?? {};
   const isWrite = selectedNode.type === "write";
   const isSource = selectedNode.type === "source";
   const isOperation = !isWrite && !isSource;
+  const mode = isOperation ? nodeMode(selectedNode, spec) : "configure";
+  const bothModes = Boolean(spec?.supports_prompt && spec?.supports_configure);
 
   const schemaPreview =
     isSource && selectedNode.data?.preview
@@ -149,7 +169,9 @@ export function InspectorPanel({
         </div>
         <div className="flex-1">
           <h2 className="text-[13px] font-semibold tracking-tight">{label}</h2>
-          {op && <p className="text-[10px] text-muted-foreground">{op.description}</p>}
+          {visual.description && (
+            <p className="text-[10px] text-muted-foreground">{visual.description}</p>
+          )}
         </div>
         {selectedStep && (
           <span
@@ -169,7 +191,26 @@ export function InspectorPanel({
       </motion.div>
 
       <div className="scrollbar-thin flex-1 space-y-4 overflow-auto px-5 py-4">
-        {isOperation && op && (
+        {isOperation && bothModes && (
+          <div className="flex rounded-xl border border-white/10 bg-black/20 p-1">
+            {(["configure", "prompt"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onModeChange(selectedNode.id, m)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] font-medium transition-colors",
+                  mode === m ? "bg-white/[0.12] text-foreground" : "text-foreground/60 hover:text-foreground",
+                )}
+              >
+                {m === "configure" ? <SlidersHorizontal className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+                {m === "configure" ? "Configure" : "Prompt (AI)"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {isOperation && mode === "prompt" && (
           <div
             className="flex items-center gap-2 rounded-xl border px-3 py-2 text-[10.5px]"
             style={{
@@ -179,12 +220,63 @@ export function InspectorPanel({
           >
             <Workflow className="h-3.5 w-3.5" style={{ color }} />
             <span className="text-foreground/85">
-              Agent scope:&nbsp;
-              <span className="font-semibold">{op.label}</span> only · prompts outside this
-              scope are refused.
+              {kind === "custom" ? (
+                <>The local model writes code for any transformation you describe.</>
+              ) : (
+                <>
+                  Agent scope:&nbsp;<span className="font-semibold">{label}</span> only · prompts
+                  outside this scope are refused.
+                </>
+              )}
             </span>
           </div>
         )}
+
+        {isOperation && mode === "configure" && spec && (
+          <div className="space-y-2">
+            <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              <SlidersHorizontal className="h-3 w-3 text-violet-400" />
+              Settings
+              <span className="ml-auto normal-case tracking-normal text-muted-foreground/60">
+                runs without AI
+              </span>
+            </label>
+            <OpConfigForm
+              spec={spec}
+              config={config}
+              onChange={(cfg) => onConfigChange(selectedNode.id, cfg)}
+              inputColumns={inputColumns}
+            />
+          </div>
+        )}
+
+        {isOperation && mode === "configure" && predicted?.columns && (
+          <div className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              <Columns3 className="h-3 w-3" />
+              Output columns ({predicted.columns.length})
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {predicted.columns.map((c) => (
+                <span key={c.name} className="rounded-md bg-white/[0.05] px-1.5 py-0.5 font-mono text-[9.5px] text-foreground/80" title={c.dtype}>
+                  {c.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {kind === "dashboard" && selectedStep?.dashboardPath && (
+          <Button
+            onClick={() => window.open(dashboardUrl(selectedStep.dashboardPath!), "_blank", "noopener")}
+            className="w-full bg-orange-500/85 text-white hover:bg-orange-500"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open dashboard in a new tab
+          </Button>
+        )}
+
+        {selectedStep?.metrics && <MetricsPanel metrics={selectedStep.metrics} />}
 
         {selectedIssues.length > 0 && (
           <div className="rounded-xl border border-rose-400/35 bg-rose-500/[0.08] p-3 text-[11px] text-rose-100">
@@ -209,21 +301,25 @@ export function InspectorPanel({
 
         {isOperation && (
           <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              <Sparkles className="h-3 w-3 text-violet-400" />
-              Natural language prompt
-            </label>
-            <Textarea
-              value={promptValue}
-              onChange={(e) => onPromptChange(selectedNode.id, e.target.value)}
-              placeholder={op?.presetPrompt || "Describe what to do with the data…"}
-              rows={6}
-              className="min-h-[130px] resize-none font-mono text-[12px] leading-relaxed text-foreground/95"
-              style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
-            />
-            <p className="text-[10px] italic text-muted-foreground">
-              Mention column names. Keep the request focused on {op?.label.toLowerCase()}.
-            </p>
+            {mode === "prompt" && (
+              <>
+                <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <Sparkles className="h-3 w-3 text-violet-400" />
+                  Natural language prompt
+                </label>
+                <Textarea
+                  value={promptValue}
+                  onChange={(e) => onPromptChange(selectedNode.id, e.target.value)}
+                  placeholder={spec?.preset_prompt || "Describe what to do with the data…"}
+                  rows={6}
+                  className="min-h-[130px] resize-none font-mono text-[12px] leading-relaxed text-foreground/95"
+                  style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+                />
+                <p className="text-[10px] italic text-muted-foreground">
+                  Mention column names. Keep the request focused on {label.toLowerCase()}.
+                </p>
+              </>
+            )}
 
             <AnimatePresence>
               {isRefusal && (
@@ -257,7 +353,12 @@ export function InspectorPanel({
                     className="-ml-2 text-foreground/80"
                   >
                     <Code2 className="h-3 w-3" />
-                    {showCode ? "Hide" : "Show"} generated code
+                    {showCode ? "Hide" : "Show"}{" "}
+                    {selectedStep.engine === "duckdb" && selectedStep.mode === "configure"
+                      ? "SQL"
+                      : selectedStep.mode === "configure"
+                      ? "details"
+                      : "generated code"}
                   </Button>
                   <AnimatePresence>
                     {showCode && (

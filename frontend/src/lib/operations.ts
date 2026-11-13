@@ -1,137 +1,77 @@
-// Operation bubble registry. Mirrors the prototype's catalogue but maps
-// each operation to the new backend's PipelineNode `kind` enum.
+// Canvas node helpers. Source and Write are built into the canvas; every
+// other box is an operation from the backend catalog (see catalog.ts).
 
-export type BackendKind =
-  | "source"
-  | "filter"
-  | "select"
-  | "drop_nulls"
-  | "fill_nulls"
-  | "rename"
-  | "deduplicate"
-  | "aggregate"
-  | "sort"
-  | "custom"
-  | "write";
+import type { Node } from "@xyflow/react";
+import { getOpSpec, opColor, opIcon, type OpSpec } from "./catalog";
 
-export interface OperationBubble {
-  operationId: string;
-  backendKind: BackendKind;
+export type NodeMode = "configure" | "prompt";
+
+export interface IoBubble {
+  operationId: "source" | "write";
   label: string;
   icon: string;
   color: string;
-  presetPrompt: string;
   description: string;
 }
 
-export const OPERATION_BUBBLES: OperationBubble[] = [
+export const IO_BUBBLES: IoBubble[] = [
   {
     operationId: "source",
-    backendKind: "source",
     label: "Source",
     icon: "📂",
     color: "#3b82f6",
-    presetPrompt: "",
-    description: "Load CSV, JSON, or Excel file",
-  },
-  {
-    operationId: "filter_rows",
-    backendKind: "filter",
-    label: "Filter",
-    icon: "🔍",
-    color: "#8b5cf6",
-    presetPrompt: "Filter rows where ",
-    description: "Filter rows by condition",
-  },
-  {
-    operationId: "drop_nulls",
-    backendKind: "drop_nulls",
-    label: "Drop nulls",
-    icon: "🧹",
-    color: "#06b6d4",
-    presetPrompt: "Drop rows with null values in ",
-    description: "Remove rows with missing values",
-  },
-  {
-    operationId: "fill_nulls",
-    backendKind: "fill_nulls",
-    label: "Fill nulls",
-    icon: "✏️",
-    color: "#14b8a6",
-    presetPrompt: "Fill null values in  with ",
-    description: "Fill missing values",
-  },
-  {
-    operationId: "rename_columns",
-    backendKind: "rename",
-    label: "Rename",
-    icon: "🏷️",
-    color: "#f59e0b",
-    presetPrompt: "Rename column  to ",
-    description: "Rename columns",
-  },
-  {
-    operationId: "dedupe",
-    backendKind: "deduplicate",
-    label: "Dedupe",
-    icon: "🔄",
-    color: "#ec4899",
-    presetPrompt: "Remove duplicate rows based on ",
-    description: "Remove duplicate rows",
-  },
-  {
-    operationId: "aggregate",
-    backendKind: "aggregate",
-    label: "Aggregate",
-    icon: "📊",
-    color: "#6366f1",
-    presetPrompt: "Sum of  by ",
-    description: "Group and aggregate",
-  },
-  {
-    operationId: "select_columns",
-    backendKind: "select",
-    label: "Select",
-    icon: "📋",
-    color: "#84cc16",
-    presetPrompt: "Keep columns: ",
-    description: "Select specific columns",
-  },
-  {
-    operationId: "sort",
-    backendKind: "sort",
-    label: "Sort",
-    icon: "↕️",
-    color: "#a855f7",
-    presetPrompt: "Sort by  ascending",
-    description: "Sort rows",
-  },
-  {
-    operationId: "custom",
-    backendKind: "custom",
-    label: "Custom",
-    icon: "✨",
-    color: "#64748b",
-    presetPrompt: "",
-    description: "Free-form natural language transform",
+    description: "Load a CSV, JSON, Excel or Parquet file",
   },
   {
     operationId: "write",
-    backendKind: "write",
     label: "Write",
     icon: "📁",
     color: "#22c55e",
-    presetPrompt: "",
-    description: "Materialize the result as a dataset",
+    description: "Save the result as a dataset and export it",
   },
 ];
 
-export function getOperationById(operationId: string): OperationBubble | undefined {
-  return OPERATION_BUBBLES.find((o) => o.operationId === operationId);
+export interface NodeVisual {
+  label: string;
+  icon: string;
+  color: string;
+  description: string;
 }
 
-export function getReactFlowNodeType(op: OperationBubble): string {
-  if (op.backendKind === "source") return "source";
-  if (op.backendKind === "write") return "write";
+/** Label, icon, colour and description for a palette id or node kind. */
+export function visualFor(kind: string, spec?: OpSpec): NodeVisual {
+  const io = IO_BUBBLES.find((b) => b.operationId === kind);
+  if (io) return io;
+  const s = spec ?? getOpSpec(kind);
+  return {
+    label: s?.label ?? kind,
+    icon: opIcon(s),
+    color: opColor(s),
+    description: s?.description ?? "",
+  };
+}
+
+/** The backend `kind` for a canvas node. */
+export function nodeKind(n: Node): string {
+  if (n.type === "source") return "source";
+  if (n.type === "write") return "write";
+  return (n.data?.backendKind as string) || (n.data?.operationId as string) || "custom";
+}
+
+/** Effective mode, mirroring the backend's PipelineNode.effective_mode. */
+export function nodeMode(n: Node, spec?: OpSpec): NodeMode {
+  const s = spec ?? getOpSpec(nodeKind(n));
+  if (s && !s.supports_prompt) return "configure";
+  if (s && !s.supports_configure) return "prompt";
+  const mode = n.data?.mode as NodeMode | undefined;
+  if (mode) return mode;
+  const cfg = n.data?.config as Record<string, unknown> | undefined;
+  return cfg && Object.keys(cfg).length > 0 ? "configure" : "prompt";
+}
+
+export function getReactFlowNodeType(kind: string): string {
+  if (kind === "source") return "source";
+  if (kind === "write") return "write";
+  if (kind === "dashboard") return "dashboard";
   return "operation";
 }

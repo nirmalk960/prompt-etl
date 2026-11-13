@@ -1,0 +1,70 @@
+{
+  "name": "Orders demo — dashboard",
+  "edgeType": "smoothstep",
+  "nodes": [
+    {
+      "id": "source-dash-1",
+      "type": "source",
+      "position": { "x": 120, "y": 200 },
+      "data": { "operationId": "source", "backendKind": "source", "label": "Source", "uploadStatus": "idle", "uploadProgress": 0 }
+    },
+    {
+      "id": "filter-dash-1",
+      "type": "operation",
+      "position": { "x": 420, "y": 200 },
+      "data": {
+        "operationId": "filter",
+        "backendKind": "filter",
+        "label": "Exclude cancelled",
+        "mode": "configure",
+        "config": {
+          "conditions": [{ "column": "order_status", "operator": "!=", "value": "cancelled" }],
+          "match": "all"
+        }
+      }
+    },
+    {
+      "id": "dashboard-dash-1",
+      "type": "dashboard",
+      "position": { "x": 720, "y": 200 },
+      "data": {
+        "operationId": "dashboard",
+        "backendKind": "dashboard",
+        "label": "Sales dashboard",
+        "mode": "configure",
+        "config": {
+          "title": "Orders dashboard",
+          "histogram_column": "order_total",
+          "pie_column": "region",
+          "pie_value": "order_total",
+          "line_x": "order_date",
+          "line_y": "order_total",
+          "line_group": "region",
+          "page_size": 20
+        }
+      }
+    },
+    {
+      "id": "write-dash-1",
+      "type": "write",
+      "position": { "x": 1020, "y": 200 },
+      "data": {
+        "operationId": "write",
+        "backendKind": "write",
+        "label": "Write",
+        "writeConfig": {
+          "datasetName": "dashboard_orders",
+          "format": "csv",
+          "destination": "download",
+          "fileName": "dashboard-orders",
+          "autoExport": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e-src-filter", "source": "source-dash-1", "target": "filter-dash-1", "type": "smoothstep", "animated": true },
+    { "id": "e-filter-dash", "source": "filter-dash-1", "target": "dashboard-dash-1", "type": "smoothstep", "animated": true },
+    { "id": "e-dash-write", "source": "dashboard-dash-1", "target": "write-dash-1", "type": "smoothstep", "animated": true }
+  ]
+}

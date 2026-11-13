@@ -121,12 +121,34 @@ export async function completeUpload(
   });
 }
 
+// -------- Operations catalog / preflight --------
+export const getOperations = () => request<import("@/lib/catalog").Catalog>("/operations");
+
+export interface NodeSchemaPreview {
+  columns: { name: string; dtype: string }[] | null;
+  error: string | null;
+}
+export const previewPipelineSchema = (definition: PipelineDefinition, signal?: AbortSignal) =>
+  request<{ nodes: Record<string, NodeSchemaPreview> }>("/pipelines/schema", {
+    method: "POST",
+    body: JSON.stringify(definition),
+    signal,
+  });
+
+/** Absolute URL for a dashboard path from a step event (e.g. "/dash/?token=..."). */
+export function dashboardUrl(path: string): string {
+  const base = resolveApiBase();
+  const abs = /^https?:\/\//i.test(base) ? base : `${window.location.origin}${base}`;
+  return `${abs}${path}`;
+}
+
 // -------- Workflows --------
 export interface PipelineNodePayload {
   id: string;
   kind: string;
   label?: string | null;
   prompt?: string | null;
+  mode?: "configure" | "prompt" | null;
   config?: Record<string, unknown>;
   dataset_id?: string | null;
   output_name?: string | null;
@@ -134,6 +156,7 @@ export interface PipelineNodePayload {
 export interface PipelineEdgePayload {
   source: string;
   target: string;
+  target_handle?: string | null;
 }
 export interface PipelineDefinition {
   nodes: PipelineNodePayload[];

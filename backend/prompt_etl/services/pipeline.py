@@ -135,7 +135,9 @@ async def _gen_code(
 ) -> str:
     # Always try the deterministic stub first. It's instant, free, and
     # produces well-formed code for the common operations.
-    stub = stub_codegen(engine=engine, node_kind=node_kind, user_prompt=user_prompt)
+    stub = stub_codegen(
+        engine=engine, node_kind=node_kind, user_prompt=user_prompt, schema=schema
+    )
     if stub is not None:
         return stub
 

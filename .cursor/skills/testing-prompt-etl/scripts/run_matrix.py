@@ -473,6 +473,24 @@ def _ops_for(engine: str) -> None:
         exp = sum(1 for r in ctx.rows if r["order_total"] < 30)
         assert len(out) == exp, f"{len(out)} rows, expected {exp}"
 
+    @test("ops", f"[{engine}] filter worded: 'is greater than'")
+    def _(ctx: Ctx):
+        _, out = run_ok(ctx, [("filter", "Filter rows where order_total is greater than 50")], engine)
+        exp = sum(1 for r in ctx.rows if r["order_total"] > 50)
+        assert len(out) == exp, f"{len(out)} rows, expected {exp}"
+
+    @test("ops", f"[{engine}] filter worded: 'is at least'")
+    def _(ctx: Ctx):
+        _, out = run_ok(ctx, [("filter", "Keep rows where order_total is at least 50")], engine)
+        exp = sum(1 for r in ctx.rows if r["order_total"] >= 50)
+        assert len(out) == exp, f"{len(out)} rows, expected {exp}"
+
+    @test("ops", f"[{engine}] filter worded: 'is not'")
+    def _(ctx: Ctx):
+        _, out = run_ok(ctx, [("filter", "Filter rows where region is not EU")], engine)
+        exp = sum(1 for r in ctx.rows if r["region"] != "EU")
+        assert len(out) == exp, f"{len(out)} rows, expected {exp}"
+
     @test("ops", f"[{engine}] select columns")
     def _(ctx: Ctx):
         _, out = run_ok(ctx, [("select", "Keep columns order_id, region, order_total")], engine)
@@ -563,7 +581,7 @@ def _chains_for(engine: str) -> None:
     @test("chains", f"[{engine}] demo: filter -> aggregate -> sort")
     def _(ctx: Ctx):
         _, out = run_ok(ctx, [
-            ("filter", "Filter rows where order_total > 50"),
+            ("filter", "Filter rows where order_total is greater than 50"),
             ("aggregate", "Group by region and calculate sum(order_total) as total_revenue, avg(order_total) as avg_order_value"),
             ("sort", "Sort by total_revenue descending"),
         ], engine)

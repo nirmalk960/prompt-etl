@@ -143,22 +143,36 @@ def build_prompt(
 # Recognises a few common phrasings so the system is usable without Ollama.
 # ---------------------------------------------------------------------------
 
-_FILTER_EQ = re.compile(
-    r"(?:filter|keep)\s+rows?\s+where\s+(\w+)\s+(?:equals?|=|is)\s+['\"]?([\w .\-]+?)['\"]?(?:\s|$)",
-    re.IGNORECASE,
-)
-_FILTER_NEQ = re.compile(
-    r"(?:filter|keep)\s+rows?\s+where\s+(\w+)\s+(?:not\s+equals?|!=|is\s+not)\s+['\"]?([\w .\-]+?)['\"]?(?:\s|$)",
-    re.IGNORECASE,
-)
-_FILTER_GT = re.compile(
-    r"(?:filter|keep)\s+rows?\s+where\s+(\w+)\s*(>|greater than|gt)\s*([\d.]+)",
-    re.IGNORECASE,
-)
-_FILTER_LT = re.compile(
-    r"(?:filter|keep)\s+rows?\s+where\s+(\w+)\s*(<|less than|lt)\s*([\d.]+)",
-    re.IGNORECASE,
-)
+# Longer phrases first so "greater than or equal to" wins over "greater than",
+# and "is greater than" is never read as equality with the word "greater".
+_FILTER_OPS: list[tuple[str, str]] = [
+    (">=", r">=|\bgreater\s+than\s+or\s+equal(?:\s+to)?\b|\bat\s+least\b|\bno\s+less\s+than\b|\bgte\b"),
+    ("<=", r"<=|\bless\s+than\s+or\s+equal(?:\s+to)?\b|\bat\s+most\b|\bno\s+more\s+than\b|\blte\b"),
+    ("!=", r"!=|<>|\bnot\s+equal(?:s|\s+to)?\b|\bdoes\s+not\s+equal\b|\bnot\b"),
+    (">", r">|\bgreater\s+than\b|\bmore\s+than\b|\bhigher\s+than\b|\babove\b|\bover\b|\bgt\b"),
+    ("<", r"<|\bless\s+than\b|\blower\s+than\b|\bbelow\b|\bunder\b|\blt\b"),
+    ("==", r"==|=|\bequals?(?:\s+to)?\b|\bequal\s+to\b|\bis\b"),
+]
+_NUMBER = r"-?\d+(?:\.\d+)?"
+_FILTER_HEAD = r"(?:filter|keep)\s+(?:only\s+)?(?:the\s+)?rows?\s+where\s+([A-Za-z_]\w*)\s*(?:\bis\s+)?"
+_FILTER_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (
+        op,
+        re.compile(
+            _FILTER_HEAD
+            + rf"(?:{words})\s*"
+            + (
+                rf"({_NUMBER})"
+                if op in {">", "<", ">=", "<="}
+                else r"(?=\S)(?!(?:in|like|null|none|empty|missing|between|contains?|greater|less|more|"
+                r"higher|lower|above|below|over|under|at|equal|not)\b)['\"]?(.+?)['\"]?"
+            )
+            + r"\s*\.?\s*$",
+            re.IGNORECASE,
+        ),
+    )
+    for op, words in _FILTER_OPS
+]
 _SELECT_COLS = re.compile(
     r"(?:keep|select)\s+columns?\s+([\w,\s]+?)(?:\.|$)",
     re.IGNORECASE,
@@ -247,26 +261,31 @@ def stub_codegen(
     engine: EngineKind,
     node_kind: str,
     user_prompt: str,
+    schema: list[dict[str, str]] | None = None,
 ) -> str | None:
     """Return generated code for a small set of recognised prompts.
 
     Used when Ollama is unavailable so the system is testable end-to-end.
     Returns ``None`` if no rule matches (caller should fall back to Ollama or
-    surface a clear error).
+    surface a clear error). With ``schema``, filters on unknown columns or that
+    compare a numeric column to text also return ``None``.
     """
     p = user_prompt.strip()
+    dtypes = {c["name"]: c["dtype"] for c in schema} if schema else None
 
     if node_kind == "filter":
-        if (m := _FILTER_EQ.search(p)):
-            col, val = m.group(1), m.group(2).strip()
-            return _filter(engine, col, "==", val)
-        if (m := _FILTER_NEQ.search(p)):
-            col, val = m.group(1), m.group(2).strip()
-            return _filter(engine, col, "!=", val)
-        if (m := _FILTER_GT.search(p)):
-            return _filter(engine, m.group(1), ">", m.group(3))
-        if (m := _FILTER_LT.search(p)):
-            return _filter(engine, m.group(1), "<", m.group(3))
+        for op, rule in _FILTER_RULES:
+            if (m := rule.search(p)):
+                col, val = m.group(1), m.group(2).strip()
+                dtype = (dtypes or {}).get(col)
+                if dtypes is not None and dtype is None:
+                    return None
+                if dtype and _is_numeric_dtype(dtype) and not re.fullmatch(_NUMBER, val):
+                    # Comparing a number column to text silently matches nothing;
+                    # let the LLM interpret the prompt instead.
+                    return None
+                return _filter(engine, col, op, val)
+        return None
 
     if node_kind == "select":
         if (m := _SELECT_COLS.search(p)):
@@ -306,6 +325,10 @@ def stub_codegen(
             return _sort(engine, m.group(1), desc)
 
     return None
+
+
+def _is_numeric_dtype(dtype: str) -> bool:
+    return bool(re.match(r"(?:u?int(?!erval)|float|double|decimal|numeric|real|bigint|smallint|tinyint|hugeint)", dtype.strip().lower()))
 
 
 # Codegen per (op, engine).

@@ -39,6 +39,44 @@ def test_select(engine: str) -> None:
     assert validate(engine, code) is None  # type: ignore[arg-type]
 
 
+_ORDERS_SCHEMA = [
+    {"name": "order_total", "dtype": "float64"},
+    {"name": "region", "dtype": "object"},
+]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("Filter rows where order_total is greater than 50", "result = df[df['order_total'] > 50]"),
+        ("Filter rows where order_total greater than 50", "result = df[df['order_total'] > 50]"),
+        ("Filter rows where order_total > 50", "result = df[df['order_total'] > 50]"),
+        ("Keep rows where order_total is at least 50", "result = df[df['order_total'] >= 50]"),
+        ("Keep only rows where order_total is less than or equal to 20.5", "result = df[df['order_total'] <= 20.5]"),
+        ("Filter rows where order_total is below 30", "result = df[df['order_total'] < 30]"),
+        ("Filter rows where region is North America", "result = df[df['region'] == 'North America']"),
+        ("Filter rows where region equals 'EU'", "result = df[df['region'] == 'EU']"),
+        ("Filter rows where region is not EU", "result = df[df['region'] != 'EU']"),
+        ("Filter rows where region not equals EU", "result = df[df['region'] != 'EU']"),
+    ],
+)
+def test_filter_phrasings(prompt: str, expected: str) -> None:
+    assert stub_codegen(engine="pandas", node_kind="filter", user_prompt=prompt, schema=_ORDERS_SCHEMA) == expected
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Filter rows where order_total is high",
+        "Filter rows where region is in North, South",
+        "Filter rows where region is null",
+        "Filter rows where missing_col equals 5",
+    ],
+)
+def test_filter_defers_to_llm(prompt: str) -> None:
+    assert stub_codegen(engine="pandas", node_kind="filter", user_prompt=prompt, schema=_ORDERS_SCHEMA) is None
+
+
 def test_unknown_returns_none() -> None:
     assert (
         stub_codegen(engine="pandas", node_kind="filter", user_prompt="please be magical")

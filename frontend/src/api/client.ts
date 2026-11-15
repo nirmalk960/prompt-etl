@@ -12,9 +12,21 @@ function resolveApiBase(): string {
   return DEFAULT_API_BASE;
 }
 
+const ACCESS_TOKEN_KEY = "prompt-etl.access-token";
+
+export function getAccessToken(): string {
+  return localStorage.getItem(ACCESS_TOKEN_KEY)?.trim() || "";
+}
+
+export function setAccessToken(token: string): void {
+  const cleaned = token.trim();
+  if (!cleaned) localStorage.removeItem(ACCESS_TOKEN_KEY);
+  else localStorage.setItem(ACCESS_TOKEN_KEY, cleaned);
+}
+
 function tokenFromStorage(): string {
-  const email = localStorage.getItem("prompt-etl.email") || "you@local";
-  return `Bearer dev:${email}`;
+  const access = getAccessToken();
+  return access ? `Bearer ${access}` : "";
 }
 
 async function request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
@@ -23,7 +35,8 @@ async function request<T = unknown>(path: string, init: RequestInit = {}): Promi
   if (!(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  headers.set("Authorization", tokenFromStorage());
+  const token = tokenFromStorage();
+  if (token) headers.set("Authorization", token);
   const res = await fetch(`${apiBase}${path}`, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();

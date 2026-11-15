@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { setAccessToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 
 interface SettingsDialogProps {
@@ -10,6 +11,7 @@ interface SettingsDialogProps {
   onEnginePrefChange: (v: "auto" | "pandas" | "polars" | "duckdb") => void;
   apiBaseUrl: string;
   onApiBaseUrlChange: (v: string) => void;
+  onAccessTokenSaved?: () => void;
 }
 
 const ENGINES = ["auto", "pandas", "polars", "duckdb"] as const;
@@ -21,20 +23,22 @@ export function SettingsDialog({
   onEnginePrefChange,
   apiBaseUrl,
   onApiBaseUrlChange,
+  onAccessTokenSaved,
 }: SettingsDialogProps) {
-  const [email, setEmail] = useState(
-    () => localStorage.getItem("prompt-etl.email") || "you@local",
+  const [accessToken, setAccessTokenValue] = useState(
+    () => localStorage.getItem("prompt-etl.access-token") || "",
   );
   const [apiUrl, setApiUrl] = useState(apiBaseUrl);
 
   useEffect(() => {
     if (!open) return;
-    setEmail(localStorage.getItem("prompt-etl.email") || "you@local");
+    setAccessTokenValue(localStorage.getItem("prompt-etl.access-token") || "");
     setApiUrl(apiBaseUrl);
   }, [open, apiBaseUrl]);
 
-  function saveEmail() {
-    localStorage.setItem("prompt-etl.email", email.trim() || "you@local");
+  function saveAccessToken() {
+    setAccessToken(accessToken);
+    onAccessTokenSaved?.();
   }
 
   function saveApiUrl() {
@@ -67,7 +71,8 @@ export function SettingsDialog({
             </button>
             <h2 className="text-base font-semibold tracking-tight">Settings</h2>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Local-dev settings. The deployed server controls the rest.
+              The server requires an access token. On the all-in-one container it
+              is stored at /data/access_token.
             </p>
 
             <div className="mt-5 space-y-5">
@@ -94,22 +99,24 @@ export function SettingsDialog({
 
               <section>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Dev auth identity
+                  Access token
                 </label>
                 <div className="mt-1 flex gap-2">
                   <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    type="password"
+                    autoComplete="off"
+                    value={accessToken}
+                    onChange={(e) => setAccessTokenValue(e.target.value)}
                     className="glass-input flex-1 rounded-lg px-3 py-1.5 text-sm"
-                    placeholder="you@local"
+                    placeholder="paste the server access token"
                   />
-                  <Button size="sm" onClick={saveEmail}>
+                  <Button size="sm" onClick={saveAccessToken}>
                     Save
                   </Button>
                 </div>
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  Only used in local development. Sent as
-                  <code className="font-mono"> Bearer dev:&lt;email&gt;</code>.
+                  From the container:
+                  <code className="font-mono"> docker exec prompt-etl cat /data/access_token</code>
                 </p>
               </section>
 

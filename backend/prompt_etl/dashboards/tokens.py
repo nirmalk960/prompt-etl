@@ -28,7 +28,10 @@ def _unb64(text: str) -> bytes:
 
 
 def _sign(body: str) -> str:
-    key = get_settings().secret_key.encode()
+    settings = get_settings()
+    if settings.secret_key == "dev-secret-change-me" and not settings.is_local:
+        raise RuntimeError("SECRET_KEY must be changed before signing dashboard links")
+    key = settings.secret_key.encode()
     return _b64(hmac.new(key, body.encode(), hashlib.sha256).digest())
 
 
@@ -43,7 +46,11 @@ def read_token(token: str | None) -> dict[str, Any] | None:
     if not token or "." not in token:
         return None
     body, sig = token.rsplit(".", 1)
-    if not hmac.compare_digest(sig, _sign(body)):
+    try:
+        expected = _sign(body)
+    except RuntimeError:
+        return None
+    if not hmac.compare_digest(sig, expected):
         return None
     try:
         payload = json.loads(_unb64(body))

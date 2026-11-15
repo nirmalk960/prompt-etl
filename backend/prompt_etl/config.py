@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     app_env: str = "local"
     log_level: str = "INFO"
     secret_key: str = "dev-secret-change-me"
+    # Required for every deployment that is reachable beyond this machine.
+    # The all-in-one entrypoint generates one into /data/access_token.
+    access_token: str = ""
+    # Email of the single operator the access token signs in as.
+    operator_email: str = "you@local"
+    # Open `Bearer dev:<email>` login. Off unless explicitly enabled.
+    # Never enable this on a server other people can reach.
+    allow_dev_auth: bool = False
+    # Largest dataset the API will accept. Upload parts are capped separately.
+    max_upload_bytes: int = 32 * 1024 * 1024 * 1024
 
     # API
     api_host: str = "0.0.0.0"

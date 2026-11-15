@@ -1,14 +1,13 @@
 """Shared FastAPI dependencies.
 
-In Phase 1 we use a 'dev token' style auth: the user passes
-    Authorization: Bearer dev:<email>
-and we either find-or-create the user and their default workspace. This is
-just enough to wire the schema and make multi-workspace UI development real,
-without committing to an OIDC provider yet (that's Phase 3).
+Callers authenticate with ``Authorization: Bearer <access token>``. The token
+is a server secret (``ACCESS_TOKEN``), not an identity the client invents.
+``ALLOW_DEV_AUTH`` is a local-only switch that still accepts ``dev:<email>``.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import uuid
 from typing import Annotated, AsyncIterator
@@ -18,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .arq_pool import get_arq_pool
+from .config import Settings, get_settings
 from .db.models import User, Workspace
 from .db.session import get_session
 
@@ -27,25 +27,35 @@ log = logging.getLogger(__name__)
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def authorized_email(token: str, settings: Settings) -> str | None:
+    """Email the token is allowed to act as, or None when it is not accepted."""
+    if settings.allow_dev_auth and token.startswith("dev:"):
+        email = token[len("dev:"):].strip().lower()
+        return email if "@" in email else None
+    expected = settings.access_token
+    if expected and hmac.compare_digest(token, expected):
+        email = settings.operator_email.strip().lower()
+        return email if "@" in email else None
+    return None
+
+
 async def get_current_user(
     session: SessionDep,
     authorization: str | None = Header(default=None),
 ) -> User:
-    """Find-or-create a user for the dev token. Phase 3 swaps for real OIDC."""
+    """Resolve the caller from the access token and find-or-create their user."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
+            detail="Missing or invalid access token",
         )
     token = authorization.split(" ", 1)[1].strip()
-    if not token.startswith("dev:"):
+    email = authorized_email(token, get_settings())
+    if email is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Phase 1 only accepts dev tokens of the form 'dev:<email>'",
+            detail="Missing or invalid access token",
         )
-    email = token[len("dev:"):].strip().lower()
-    if "@" not in email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email in token")
 
     row = await session.execute(select(User).where(User.email == email))
     user = row.scalar_one_or_none()
@@ -56,7 +66,7 @@ async def get_current_user(
         ws = Workspace(name="default", owner_id=user.id)
         session.add(ws)
         await session.flush()
-        log.info("dev-auth: created user %s and default workspace", email)
+        log.info("auth: created user %s and default workspace", email)
     return user
 
 

@@ -30,6 +30,7 @@ from sqlalchemy import select
 
 from ..arq_pool import get_arq_pool
 from ..db.models import Dataset
+from ..config import get_settings
 from ..deps import CurrentWorkspace, SessionDep
 from ..schemas.dataset import (
     DatasetComplete,
@@ -66,6 +67,12 @@ async def init_upload(
     session: SessionDep,
     workspace: CurrentWorkspace,
 ) -> DatasetInitResponse:
+    settings = get_settings()
+    if body.size_bytes > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"dataset is larger than the {settings.max_upload_bytes} byte limit",
+        )
     store = get_object_store()
     store.ensure_bucket()
 

@@ -49,9 +49,20 @@ def _restricted_namespace(inputs: list[pl.LazyFrame]) -> dict[str, Any]:
 
 
 def _run_sync(code: str, input_paths: list[str], output_path: str) -> tuple[int, int]:
+    from ..services.agent_guard import validate_python
+    from .sandbox import SandboxError, module_guard, seal_frame_io
+
+    rejected = validate_python(code)
+    if rejected:
+        raise RuntimeError(rejected)
     inputs = [pl.scan_parquet(p) for p in input_paths]
     ns = _restricted_namespace(inputs)
-    exec(code, ns)  # noqa: S102 - sandboxed via _restricted_namespace
+    ns["pl"] = module_guard(pl)
+    try:
+        with seal_frame_io():
+            exec(code, ns)  # noqa: S102 - prompt code; fenced by validate_python and the module guard
+    except SandboxError as e:
+        raise RuntimeError(str(e)) from e
     result = ns.get("result")
     if result is None:
         raise RuntimeError("polars step did not assign `result`")

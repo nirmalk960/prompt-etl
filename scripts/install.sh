@@ -59,6 +59,9 @@ for i in $(seq 1 60); do
     bold "PromptETL is running:  http://localhost:$PORT"
     curl -fsS "http://localhost:$PORT/api/ready" | sed 's/^/  /'
     echo
+    echo "Access token (paste it into Settings in the app):"
+    echo "  docker exec $NAME cat /data/access_token"
+    echo
     echo "Optional: set up the local LLM with  ./scripts/setup_ollama.sh"
     echo "Logs:     docker logs -f $NAME"
     exit 0

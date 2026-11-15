@@ -177,10 +177,12 @@ class S3ObjectStore:
     def upload_file(
         self, local_path: str, object_key: str, content_type: str | None = None
     ) -> None:
+        object_key = validate_object_key(object_key)
         extra = {"ContentType": content_type} if content_type else None
         self._client.upload_file(local_path, self.bucket, object_key, ExtraArgs=extra)
 
     def download_to_file(self, object_key: str, local_path: str) -> None:
+        object_key = validate_object_key(object_key)
         self._client.download_file(self.bucket, object_key, local_path)
 
     def head(self, object_key: str) -> dict | None:
@@ -211,6 +213,18 @@ class S3ObjectStore:
 _UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
+def validate_object_key(object_key: str) -> str:
+    """Reject keys that could leave the bucket directory."""
+    if not isinstance(object_key, str) or not object_key or len(object_key) > 1024:
+        raise ValueError("invalid object key")
+    if object_key.startswith(("/", "\\")) or "\\" in object_key or "\x00" in object_key:
+        raise ValueError("invalid object key")
+    parts = object_key.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("invalid object key")
+    return object_key
+
+
 class LocalObjectStore:
     """Stores objects under ``root/bucket/key``.
 
@@ -235,7 +249,12 @@ class LocalObjectStore:
         return os.path.join(self._root, self.bucket)
 
     def _path_for(self, object_key: str) -> str:
-        return os.path.join(self._bucket_root(), object_key)
+        key = validate_object_key(object_key)
+        root = os.path.abspath(self._bucket_root())
+        dest = os.path.abspath(os.path.join(root, *key.split("/")))
+        if os.path.commonpath([root, dest]) != root:
+            raise ValueError("invalid object key")
+        return dest
 
     def _staging_dir(self, upload_id: str) -> str:
         if not _UPLOAD_ID_RE.match(upload_id):

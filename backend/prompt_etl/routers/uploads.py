@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -44,12 +45,19 @@ async def put_upload_part(
 
     md5 = hashlib.md5()
     size = 0
+    limit = store.PART_SIZE
     try:
         with open(path, "wb") as fh:
             async for chunk in request.stream():
+                size += len(chunk)
+                if size > limit:
+                    fh.close()
+                    os.remove(path)
+                    raise HTTPException(status_code=413, detail="upload part exceeds 64 MiB")
                 fh.write(chunk)
                 md5.update(chunk)
-                size += len(chunk)
+    except HTTPException:
+        raise
     except Exception:
         log.exception("part upload failed upload_id=%s part=%s", upload_id, part_number)
         raise HTTPException(status_code=500, detail="part write failed") from None

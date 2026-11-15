@@ -31,6 +31,7 @@ import {
   createJob,
   exportDataset,
   getDataset,
+  getAccessToken,
   getApiBaseUrl,
   getReady,
   initUpload,
@@ -166,7 +167,7 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [backendOk, setBackendOk] = useState(false);
   const [ready, setReady] = useState<ReadyState | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(() => !getAccessToken());
   const [enginePref, setEnginePref] = useState<
     "auto" | "pandas" | "polars" | "duckdb"
   >("auto");
@@ -203,6 +204,7 @@ export default function App() {
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const catalog = useCatalogStore((s) => s.catalog);
+  const catalogError = useCatalogStore((s) => s.error);
   const loadCatalog = useCatalogStore((s) => s.load);
   const nodeSchemas = useWorkflowStore((s) => s.nodeSchemas);
   const setNodeSchemas = useWorkflowStore((s) => s.setNodeSchemas);
@@ -212,8 +214,14 @@ export default function App() {
   }, [boardName]);
 
   useEffect(() => {
-    if (backendOk) loadCatalog();
+    if (backendOk && getAccessToken()) loadCatalog();
   }, [backendOk, loadCatalog]);
+
+  useEffect(() => {
+    if (!getAccessToken() || (catalogError != null && catalogError.startsWith("401"))) {
+      setSettingsOpen(true);
+    }
+  }, [catalogError]);
 
   // Ask the backend for each node's output columns (no data is processed).
   // Keyed on the definition so dragging nodes around doesn't refetch.
@@ -1000,6 +1008,10 @@ export default function App() {
           setApiBaseUrl(v);
           setApiBaseUrlState(getApiBaseUrl());
           setBackendOk(false);
+        }}
+        onAccessTokenSaved={() => {
+          useCatalogStore.setState({ catalog: null, error: null });
+          if (getAccessToken()) void loadCatalog();
         }}
       />
       {jobId && runStatus === "running" && (

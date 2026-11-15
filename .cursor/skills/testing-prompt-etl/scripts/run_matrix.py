@@ -59,7 +59,8 @@ class ApiError(Exception):
 class Api:
     def __init__(self, base: str, email: str, timeout: float) -> None:
         self.base = base.rstrip("/")
-        self.auth = f"Bearer dev:{email}"
+        token = os.environ.get("PROMPT_ETL_ACCESS_TOKEN") or os.environ.get("ACCESS_TOKEN")
+        self.auth = f"Bearer {token}" if token else f"Bearer dev:{email}"
         self.timeout = timeout
 
     def request(

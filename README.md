@@ -351,6 +351,16 @@ by supervisord), auto-tunes worker concurrency and Postgres `shared_buffers` to
 the RAM it's given, and persists all state in the `/data` volume. Full details:
 [`deploy/README.md`](deploy/README.md).
 
+The API requires an access token. The first boot writes one to
+`/data/access_token`. Paste it into Settings in the app:
+
+```bash
+docker exec prompt-etl cat /data/access_token
+```
+
+`ALLOW_DEV_AUTH` stays unset on this image. Do not set it on a server other
+people can reach. It turns login back into `Bearer dev:<email>`.
+
 ---
 
 ## LLM setup (Ollama)
@@ -424,7 +434,10 @@ All settings come from environment variables (see `.env.example`). Key ones:
 | `OLLAMA_DISABLE` | `0` | Set `1` to force deterministic codegen only |
 | `ARQ_MAX_JOBS` | auto (~1 per 2 GiB, 1–8) | Concurrent pipeline jobs |
 | `ENGINE_SPARK_THRESHOLD_BYTES` | 50 GiB | Upper bound before jobs are refused (Phase 2: Spark) |
-| `SECRET_KEY` | generated into `/data/secret_key` (all-in-one) | Signs dashboard links; set it explicitly in the dev stack |
+| `ACCESS_TOKEN` | generated into `/data/access_token` (all-in-one) | Required `Authorization: Bearer` secret. Paste it into Settings |
+| `ALLOW_DEV_AUTH` | `false` | Accepts `Bearer dev:<email>`. Leave off on any shared or public server |
+| `OPERATOR_EMAIL` | `you@local` | Workspace the access token signs in as |
+| `SECRET_KEY` | generated into `/data/secret_key` (all-in-one) | Signs dashboard links. The default `dev-secret-change-me` is refused when `APP_ENV` is not local |
 | `DASH_PATH_PREFIX` | `/api/dash/` | Public URL prefix of dashboards (`/dash/` when the API is served at the root) |
 
 In the dev stack these are set by `docker-compose.yml`; in the single image the

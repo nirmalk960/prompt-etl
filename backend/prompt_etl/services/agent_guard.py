@@ -23,6 +23,21 @@ _PYTHON_BANNED_MODULES = {
     "os", "sys", "subprocess", "shutil", "socket", "requests",
     "urllib", "http", "pathlib", "io", "ctypes", "pickle", "marshal",
 }
+# Also rejected when they appear as attributes (``pd.io.common.os``).
+_PYTHON_BLOCKED_ATTRS = _PYTHON_BANNED_MODULES | {
+    "posix", "nt", "builtins", "importlib", "eval", "query", "system", "popen",
+}
+_IO_ATTR_PREFIXES = ("read_", "scan_", "write_", "sink_")
+_IO_ATTR_NAMES = {
+    "to_csv", "to_pickle", "to_excel", "to_json", "to_html", "to_sql",
+    "to_feather", "to_parquet", "to_clipboard", "to_hdf", "to_stata",
+    "to_xml", "to_orc", "open",
+}
+
+
+def _io_attr(name: str) -> bool:
+    lower = name.lower()
+    return lower in _IO_ATTR_NAMES or lower.startswith(_IO_ATTR_PREFIXES)
 
 
 def validate_python(code: str, *, allowed_top_assign: str = "result") -> str | None:
@@ -39,8 +54,10 @@ def validate_python(code: str, *, allowed_top_assign: str = "result") -> str | N
         if isinstance(node, ast.ImportFrom):
             return "import statements are not allowed"
         if isinstance(node, ast.Attribute):
-            if node.attr.startswith("__") and node.attr.endswith("__"):
-                return f"dunder attribute access not allowed: {node.attr}"
+            if node.attr.startswith("_") or node.attr.lower() in _PYTHON_BLOCKED_ATTRS:
+                return f"attribute '{node.attr}' is not allowed"
+            if _io_attr(node.attr):
+                return f"'{node.attr}' is not allowed"
         if isinstance(node, ast.Name):
             if node.id in _PYTHON_BANNED_NAMES:
                 return f"use of '{node.id}' is not allowed"
@@ -59,7 +76,9 @@ def validate_python(code: str, *, allowed_top_assign: str = "result") -> str | N
 
 _DUCKDB_FORBIDDEN = re.compile(
     r"\b(ATTACH|INSTALL|LOAD|COPY|PRAGMA|EXPORT|IMPORT|CREATE\s+SECRET|SET\s+|"
-    r"INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b",
+    r"INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CALL|EXECUTE|PREPARE|"
+    r"READ_\w+|SCAN_\w+|GLOB|GETENV|SQLITE_\w+|POSTGRES_\w+|ICEBERG_\w+|DELTA_\w+|"
+    r"LOAD_AWS_CREDENTIALS|WHICH_SECRET)\b",
     re.IGNORECASE,
 )
 
@@ -74,6 +93,10 @@ def validate_sql(sql: str) -> str | None:
         return "SQL contains forbidden keyword (mutations / DDL / pragmas)"
     if ";" in s:
         return "multi-statement SQL is not allowed"
+    if "--" in s or "/*" in s or "*/" in s:
+        return "SQL comments are not allowed"
+    if re.search(r"\bFROM\s+['\"]", s, re.IGNORECASE):
+        return "SQL may not read files"
     return None
 
 

@@ -11,29 +11,22 @@ so even datasets larger than RAM stream through DuckDB's spill-to-disk executor.
 from __future__ import annotations
 
 import asyncio
-import re
+import os
 from typing import Any
 
 import duckdb
 
+from ..ops.runner import sandboxed_connection
+from ..services.agent_guard import validate_sql
 from .base import DataEngine, StepPreview, StepResult
 from ._io import staged_inputs, staged_output, upload_output
 
-_FORBIDDEN_SQL = re.compile(
-    r"\b(ATTACH|INSTALL|LOAD|COPY|PRAGMA|EXPORT|IMPORT|CREATE\s+SECRET|SET\s+)\b",
-    re.IGNORECASE,
-)
-
 
 def _validate_sql(sql: str) -> str:
-    sql = sql.strip().rstrip(";").strip()
-    if not sql:
-        raise RuntimeError("duckdb step produced empty SQL")
-    if not re.match(r"^\s*(WITH|SELECT)\b", sql, re.IGNORECASE):
-        raise RuntimeError("duckdb step SQL must start with SELECT or WITH")
-    if _FORBIDDEN_SQL.search(sql):
-        raise RuntimeError("duckdb step SQL contains a forbidden keyword")
-    return sql
+    reason = validate_sql(sql)
+    if reason:
+        raise RuntimeError(f"duckdb step rejected: {reason}")
+    return sql.strip().rstrip(";").strip()
 
 
 def _sql_literal(path: str) -> str:
@@ -57,11 +50,14 @@ def _preview_from_pandas(df, *, rows: int, bytes_: int | None) -> StepPreview:
 
 def _run_sync(sql: str, input_paths: list[str], output_path: str) -> tuple[int, int]:
     sql = _validate_sql(sql)
-    con = duckdb.connect()
+    allowed = []
+    for path in [*input_paths, output_path]:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory not in allowed:
+            allowed.append(directory)
+    # Same lock as configured SQL ops: no file reads outside the step's temp dirs.
+    con = sandboxed_connection(allowed)
     try:
-        con.execute("PRAGMA threads=4")
-        # DuckDB does NOT allow parameterized DDL. Paths are local temp files
-        # we just downloaded — safe to interpolate after escaping single quotes.
         for i, p in enumerate(input_paths):
             con.execute(
                 f"CREATE OR REPLACE VIEW input_{i} AS SELECT * FROM read_parquet({_sql_literal(p)})"

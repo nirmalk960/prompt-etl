@@ -31,6 +31,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("object store bucket bootstrap failed (continuing)")
     await get_arq_pool()
+    if settings.allow_dev_auth:
+        log.warning(
+            "ALLOW_DEV_AUTH is enabled. Anyone who can reach the API can claim a user. "
+            "Do not expose this process."
+        )
+    if not settings.access_token and not settings.allow_dev_auth:
+        log.warning("ACCESS_TOKEN is not set. Authenticated routes will reject every request.")
+    if settings.secret_key == "dev-secret-change-me" and not settings.is_local:
+        log.error("SECRET_KEY is still the default. Set SECRET_KEY before exposing this server.")
     log.info("API startup complete env=%s", settings.app_env)
     yield
     await shutdown_arq_pool()
@@ -45,7 +54,7 @@ def create_app() -> FastAPI:
         title="Prompt ETL API",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/docs",
+        docs_url="/docs" if settings.is_local else None,
         redoc_url=None,
     )
     app.add_middleware(

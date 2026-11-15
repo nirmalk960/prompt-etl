@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API="${API:-http://localhost:8000}"
 FRONTEND="${FRONTEND:-http://localhost:5173}"
 EMAIL="${EMAIL:-smoke-heavy@local}"
-AUTH="Authorization: Bearer dev:${EMAIL}"
+if [ -n "${ACCESS_TOKEN:-}" ]; then AUTH="Authorization: Bearer ${ACCESS_TOKEN}"; else AUTH="Authorization: Bearer dev:${EMAIL}"; fi
 TMPDIR="${TMPDIR:-/tmp/prompt-etl-smoke}"
 mkdir -p "$TMPDIR"
 

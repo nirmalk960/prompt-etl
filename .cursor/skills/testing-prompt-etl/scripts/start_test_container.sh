@@ -42,7 +42,10 @@ case "$CMD" in
       docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "pull failed and $IMAGE is not available locally" >&2; exit 1; }
       echo "pull failed; using the local copy of $IMAGE" >&2
     fi
-    ENV_ARGS=()
+    # The test container is not a public deployment. Dev login stays available
+    # here so the matrix can keep using Bearer dev:<email>. Do not copy this
+    # flag onto a server other people can reach.
+    ENV_ARGS=(-e ALLOW_DEV_AUTH=true -e APP_ENV=local)
     [ -n "${OLLAMA_MODEL:-}" ] && ENV_ARGS+=(-e "OLLAMA_MODEL=$OLLAMA_MODEL")
     [ -n "${OLLAMA_DISABLE:-}" ] && ENV_ARGS+=(-e "OLLAMA_DISABLE=$OLLAMA_DISABLE")
     docker run -d --name "$NAME" -p "$PORT:8080" -v "$VOLUME:/data" \

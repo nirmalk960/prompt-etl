@@ -15,7 +15,7 @@ set -euo pipefail
 
 API="${API:-http://localhost:8000}"
 EMAIL="${EMAIL:-smoke@local}"
-AUTH="Authorization: Bearer dev:${EMAIL}"
+if [ -n "${ACCESS_TOKEN:-}" ]; then AUTH="Authorization: Bearer ${ACCESS_TOKEN}"; else AUTH="Authorization: Bearer dev:${EMAIL}"; fi
 
 say() { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 

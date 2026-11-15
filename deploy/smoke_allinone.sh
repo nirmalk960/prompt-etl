@@ -12,7 +12,7 @@ PORT="${PORT:-8090}"
 NAME="prompt-etl-smoke"
 VOLUME="prompt-etl-smoke-data"
 API="http://localhost:$PORT/api"
-AUTH="Authorization: Bearer dev:smoke@local"
+if [ -n "${ACCESS_TOKEN:-}" ]; then AUTH="Authorization: Bearer ${ACCESS_TOKEN}"; else AUTH="Authorization: Bearer dev:smoke@local"; fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP=$(mktemp -d -t prompt-etl-smoke)
 

@@ -37,9 +37,10 @@ Rules:
 - Output ONLY a Python code block (no prose, no markdown fences).
 - Inputs are `inputs` (list of DataFrames) and `df` (= inputs[0]).
 - Assign the final DataFrame to a variable named `result`.
-- Do NOT import anything. `pd` and `pl` are pre-imported.
-- Do NOT read/write files, network, env, subprocess, or os.
-- Use ONLY pandas: .query, boolean indexing, .groupby, .merge, .drop_duplicates, .rename, .fillna, .dropna, .sort_values, column selection.
+- Do NOT import anything. `pd` is pre-imported.
+- Do NOT read or write files, use the network, or touch os, sys, io, or subprocess.
+- Do NOT call .query, .eval, read_*, scan_*, to_csv, to_parquet, or to_pickle.
+- Use ONLY pandas: boolean indexing, .groupby, .merge, .drop_duplicates, .rename, .fillna, .dropna, .sort_values, column selection.
 """
 
 _POLARS_SYSTEM = """You are a precise Polars code generator.
@@ -48,7 +49,8 @@ Rules:
 - Inputs are `inputs` (list of LazyFrames) and `df` (= inputs[0]).
 - Assign the final pl.LazyFrame to a variable named `result`.
 - Do NOT import anything. `pl` is pre-imported.
-- Do NOT read/write files, network, env, subprocess, or os.
+- Do NOT read or write files, use the network, or touch os, sys, or subprocess.
+- Do NOT call read_*, scan_*, write_*, or sink_*.
 - Prefer lazy expressions: pl.col(...), .filter(...), .select(...), .with_columns(...), .group_by(...).agg(...), .sort(...), .unique(...), .drop_nulls(...), .fill_null(...).
 """
 
@@ -56,7 +58,7 @@ _DUCKDB_SYSTEM = """You are a precise DuckDB SQL generator.
 Rules:
 - Output ONLY a single SQL SELECT (or WITH ... SELECT) statement. No prose, no semicolons, no markdown.
 - Inputs are exposed as views named input_0, input_1, ...; `df` aliases input_0.
-- Forbidden: ATTACH, INSTALL, LOAD, COPY, PRAGMA, EXPORT, IMPORT, CREATE SECRET, SET, DDL.
+- Forbidden: comments, extra statements, reading files (read_csv, read_parquet, FROM a path), ATTACH, INSTALL, LOAD, COPY, PRAGMA, SET, and any DDL.
 - Use standard SQL: WHERE, GROUP BY, ORDER BY, JOIN, DISTINCT, CASE, COALESCE.
 """
 
@@ -332,45 +334,79 @@ def _is_numeric_dtype(dtype: str) -> bool:
 
 
 # Codegen per (op, engine).
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _quote_val(v: str) -> str:
     if re.match(r"^-?\d+(\.\d+)?$", v):
         return v
     return repr(v)
 
 
-def _filter(engine: EngineKind, col: str, op: str, val: str) -> str:
+def _sql_ident(name: str) -> str | None:
+    """Quote a plain column name. Anything else is refused, not interpolated."""
+    if not _IDENT.fullmatch(name):
+        return None
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _sql_text(value: str) -> str:
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+        return value
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_idents(names: list[str]) -> list[str] | None:
+    quoted: list[str] = []
+    for name in names:
+        ident = _sql_ident(name)
+        if ident is None:
+            return None
+        quoted.append(ident)
+    return quoted
+
+
+def _filter(engine: EngineKind, col: str, op: str, val: str) -> str | None:
     vlit = _quote_val(val)
     if engine == "pandas":
         return f"result = df[df[{col!r}] {op} {vlit}]"
     if engine == "polars":
         return f"result = df.filter(pl.col({col!r}) {op} {vlit})"
     if engine == "duckdb":
-        sql_op = op
-        return f"SELECT * FROM df WHERE {col} {sql_op} {vlit}"
+        quoted = _sql_ident(col)
+        if quoted is None:
+            return None
+        return f"SELECT * FROM df WHERE {quoted} {op} {_sql_text(val)}"
     raise ValueError(engine)
 
 
-def _select(engine: EngineKind, cols: list[str]) -> str:
+def _select(engine: EngineKind, cols: list[str]) -> str | None:
     if engine == "pandas":
         return f"result = df[{cols!r}]"
     if engine == "polars":
         return f"result = df.select({cols!r})"
     if engine == "duckdb":
-        return "SELECT " + ", ".join(cols) + " FROM df"
+        quoted = _sql_idents(cols)
+        if not quoted:
+            return None
+        return "SELECT " + ", ".join(quoted) + " FROM df"
     raise ValueError(engine)
 
 
-def _rename(engine: EngineKind, old: str, new: str) -> str:
+def _rename(engine: EngineKind, old: str, new: str) -> str | None:
     if engine == "pandas":
         return f"result = df.rename(columns={{{old!r}: {new!r}}})"
     if engine == "polars":
         return f"result = df.rename({{{old!r}: {new!r}}})"
     if engine == "duckdb":
-        return f"SELECT * RENAME ({old} AS {new}) FROM df"
+        left, right = _sql_ident(old), _sql_ident(new)
+        if left is None or right is None:
+            return None
+        return f"SELECT * RENAME ({left} AS {right}) FROM df"
     raise ValueError(engine)
 
 
-def _drop_nulls(engine: EngineKind, col: str | None) -> str:
+def _drop_nulls(engine: EngineKind, col: str | None) -> str | None:
     if engine == "pandas":
         if col:
             return f"result = df.dropna(subset=[{col!r}])"
@@ -381,12 +417,15 @@ def _drop_nulls(engine: EngineKind, col: str | None) -> str:
         return "result = df.drop_nulls()"
     if engine == "duckdb":
         if col:
-            return f"SELECT * FROM df WHERE {col} IS NOT NULL"
+            quoted = _sql_ident(col)
+            if quoted is None:
+                return None
+            return f"SELECT * FROM df WHERE {quoted} IS NOT NULL"
         return "SELECT * FROM df WHERE COLUMNS(*) IS NOT NULL"
     raise ValueError(engine)
 
 
-def _dedup(engine: EngineKind, cols: list[str] | None) -> str:
+def _dedup(engine: EngineKind, cols: list[str] | None) -> str | None:
     if engine == "pandas":
         if cols:
             return f"result = df.drop_duplicates(subset={cols!r})"
@@ -397,12 +436,15 @@ def _dedup(engine: EngineKind, cols: list[str] | None) -> str:
         return "result = df.unique()"
     if engine == "duckdb":
         if cols:
-            return "SELECT DISTINCT ON (" + ", ".join(cols) + ") * FROM df"
+            quoted = _sql_idents(cols)
+            if not quoted:
+                return None
+            return "SELECT DISTINCT ON (" + ", ".join(quoted) + ") * FROM df"
         return "SELECT DISTINCT * FROM df"
     raise ValueError(engine)
 
 
-def _agg(engine: EngineKind, fn: str, col: str, by: list[str]) -> str:
+def _agg(engine: EngineKind, fn: str, col: str, by: list[str]) -> str | None:
     fn_map = {"avg": "mean"}
     pdfn = fn_map.get(fn, fn)
     if engine == "pandas":
@@ -421,14 +463,23 @@ def _agg(engine: EngineKind, fn: str, col: str, by: list[str]) -> str:
         return f"result = df.select(pl.col({col!r}).{pdfn}().alias('{col}_{pdfn}'))"
     if engine == "duckdb":
         sqlfn = "AVG" if fn in {"mean", "avg"} else fn.upper()
+        if sqlfn not in {"AVG", "SUM", "COUNT", "MIN", "MAX"}:
+            return None
+        quoted_col = _sql_ident(col)
+        alias = _sql_ident(f"{col}_{fn}")
+        if quoted_col is None or alias is None:
+            return None
         if by:
+            quoted_by = _sql_idents(by)
+            if not quoted_by:
+                return None
             return (
                 "SELECT "
-                + ", ".join(by)
-                + f", {sqlfn}({col}) AS {col}_{fn} FROM df GROUP BY "
-                + ", ".join(by)
+                + ", ".join(quoted_by)
+                + f", {sqlfn}({quoted_col}) AS {alias} FROM df GROUP BY "
+                + ", ".join(quoted_by)
             )
-        return f"SELECT {sqlfn}({col}) AS {col}_{fn} FROM df"
+        return f"SELECT {sqlfn}({quoted_col}) AS {alias} FROM df"
     raise ValueError(engine)
 
 
@@ -539,19 +590,33 @@ def _agg_from_groupby_prompt(engine: EngineKind, prompt: str) -> str | None:
         return "\n".join(lines)
 
     if engine == "duckdb":
+        if month_source and _sql_ident(month_source) is None:
+            return None
         select_parts: list[str] = []
         group_parts: list[str] = []
         if month_source:
-            select_parts.append(f"SUBSTR(CAST({month_source} AS VARCHAR), 1, 7) AS month")
+            quoted_month = _sql_ident(month_source)
+            select_parts.append(f"SUBSTR(CAST({quoted_month} AS VARCHAR), 1, 7) AS month")
             group_parts.append("month")
         for c in by_cols:
-            if c != "month":
-                select_parts.append(c)
-                group_parts.append(c)
+            if c == "month":
+                continue
+            quoted = _sql_ident(c)
+            if quoted is None:
+                return None
+            select_parts.append(quoted)
+            group_parts.append(quoted)
         for alias_raw, fn_raw, col in metrics:
             fn = "AVG" if fn_raw.lower() in {"avg", "mean"} else fn_raw.upper()
-            alias = _clean_metric_alias(alias_raw, source_col=col, fn_raw=fn_raw)
-            select_parts.append(f"{fn}({col}) AS {alias}")
+            if fn not in {"AVG", "SUM", "COUNT", "MIN", "MAX"}:
+                return None
+            quoted_col = _sql_ident(col)
+            alias = _sql_ident(_clean_metric_alias(alias_raw, source_col=col, fn_raw=fn_raw))
+            if quoted_col is None or alias is None:
+                return None
+            select_parts.append(f"{fn}({quoted_col}) AS {alias}")
+        if not select_parts:
+            return None
         if group_parts:
             return f"SELECT {', '.join(select_parts)} FROM df GROUP BY {', '.join(group_parts)}"
         return f"SELECT {', '.join(select_parts)} FROM df"
@@ -559,13 +624,16 @@ def _agg_from_groupby_prompt(engine: EngineKind, prompt: str) -> str | None:
     return None
 
 
-def _sort(engine: EngineKind, col: str, desc: bool) -> str:
+def _sort(engine: EngineKind, col: str, desc: bool) -> str | None:
     if engine == "pandas":
         return f"result = df.sort_values(by={col!r}, ascending={not desc})"
     if engine == "polars":
         return f"result = df.sort({col!r}, descending={desc})"
     if engine == "duckdb":
-        return f"SELECT * FROM df ORDER BY {col} {'DESC' if desc else 'ASC'}"
+        quoted = _sql_ident(col)
+        if quoted is None:
+            return None
+        return f"SELECT * FROM df ORDER BY {quoted} {'DESC' if desc else 'ASC'}"
     raise ValueError(engine)
 
 

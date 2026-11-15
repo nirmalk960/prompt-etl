@@ -16,6 +16,20 @@ PGDB="${POSTGRES_DB:-prompt_etl}"
 mkdir -p /data/objects /data/redis /run/postgresql
 chown -R postgres:postgres /run/postgresql
 
+# The shipped image is a public deployment unless the operator says otherwise.
+export APP_ENV="${APP_ENV:-production}"
+
+# Access token for the API. Generated once and kept on the volume.
+# Read it with: docker exec <container> cat /data/access_token
+if [ -z "${ACCESS_TOKEN:-}" ]; then
+  if [ ! -s /data/access_token ]; then
+    (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /data/access_token)
+    echo "[entrypoint] generated API access token at /data/access_token"
+  fi
+  ACCESS_TOKEN=$(cat /data/access_token)
+  export ACCESS_TOKEN
+fi
+
 # Signing key for dashboard links: generated once, kept on the volume so
 # links survive restarts. An explicit SECRET_KEY env var wins.
 if [ -z "${SECRET_KEY:-}" ]; then

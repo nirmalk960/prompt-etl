@@ -9,8 +9,7 @@ When a step is easier to describe than to configure, switch the box to
 **Prompt** mode (or use a **Custom** box) and a local LLM writes the code.
 Live progress streams back, backed by object storage, an async job queue, and
 a tiered compute router that picks the right engine for the data size.
-
-> **Status:** private preview. This repository is the primary codebase.
+The project is released under the [MIT license](LICENSE).
 
 Prompt ETL auto-picks the right compute engine for the data size:
 
@@ -39,7 +38,7 @@ image** behaves correctly on a 16 GB laptop and a 256 GB worker node.
 - [Repo layout](#repo-layout)
 - [Configuration](#configuration)
 - [Testing](#testing)
-- [Publishing](#publishing-a-private-image)
+- [Publishing](#publishing)
 - [What's implemented](#whats-implemented-phase-1)
 - [License](#license)
 
@@ -465,16 +464,21 @@ python scripts/generate_test_json.py     # ~10 GB JSONL for Polars/DuckDB
 
 ---
 
-## Publishing (a private image)
+## Publishing
 
-This repo is private; the recommended registry is **GitHub Container Registry
-(GHCR)**, whose package inherits the repo's private visibility. On every
-`vX.Y.Z` git tag, [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml)
+On every `vX.Y.Z` git tag, [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml)
 builds a multi-arch (`amd64` + `arm64`) image and pushes it to
-`ghcr.io/nirmalk960/prompt-etl` using the built-in token — no secrets to set up:
+`ghcr.io/nirmalk960/prompt-etl` using the built-in token. No extra secrets
+are required:
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+After the package is public, anyone can run the current release with:
+
+```bash
+docker pull ghcr.io/nirmalk960/prompt-etl:0.2.1
 ```
 
 To publish manually, see [`deploy/README.md`](deploy/README.md#publishing-to-github-container-registry-ghcr).
@@ -515,4 +519,4 @@ See [`docs/PHASE2_SPARK.md`](docs/PHASE2_SPARK.md) and
 
 ## License
 
-MIT
+[MIT](LICENSE)

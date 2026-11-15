@@ -30,7 +30,7 @@ bash scripts/start_test_container.sh up                       # ghcr.io/nirmalk9
 bash scripts/start_test_container.sh up prompt-etl:latest     # a locally built image instead
 ```
 
-The GHCR image is private: if the pull fails with `denied`, ask the user to run `docker login ghcr.io`. Do not pipe tokens through the shell yourself.
+If a pull from GHCR fails with `denied`, test the locally built image instead. Do not pipe tokens through the shell.
 
 For a deterministic run without Ollama, start with `OLLAMA_DISABLE=1`.
 

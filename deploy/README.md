@@ -82,15 +82,16 @@ availability, and the active model.
 
 ## Publishing to GitHub Container Registry (GHCR)
 
-Goal: one published image that anyone with access pulls and runs with a single
-command, on Intel or ARM, without building anything. Because this repo is
-**private**, the GHCR package is private too â€” only accounts you grant access to
-can pull it.
+A version tag publishes one multi-arch image. Anyone can pull a public package
+and run it with a single command, on Intel or ARM, without building it.
 
 ### One-time setup
 
+Publishing from a laptop needs a token. The GitHub Actions workflow uses the
+built-in `GITHUB_TOKEN` and does not need this login.
+
 1. Create a GitHub Personal Access Token (classic) with the `write:packages`
-   scope at https://github.com/settings/tokens (add `read:packages` for pulling).
+   scope at https://github.com/settings/tokens.
 2. Log in to GHCR locally:
 
 ```bash
@@ -100,11 +101,11 @@ echo "<your-token>" | docker login ghcr.io -u nirmalk960 --password-stdin
 ### Publish (manual, multi-arch)
 
 ```bash
-NAMESPACE=nirmalk960 VERSION=0.1.0 ./deploy/publish.sh
+NAMESPACE=nirmalk960 VERSION=0.2.1 ./deploy/publish.sh
 ```
 
 This builds `linux/amd64` + `linux/arm64` and pushes
-`ghcr.io/nirmalk960/prompt-etl:0.1.0`, `:0.1`, and `:latest`. The script creates
+`ghcr.io/nirmalk960/prompt-etl:0.2.1`, `:0.2`, and `:latest`. The script creates
 a `docker-container` buildx builder automatically.
 
 ### Publish (automated via GitHub Actions)
@@ -115,16 +116,15 @@ publishes to GHCR on every `vX.Y.Z` git tag using the built-in `GITHUB_TOKEN` â€
 (already set in the file). Then:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-The published package appears under your repo's **Packages** and inherits its
-private visibility.
+The published package appears under the repository's **Packages**. Set that
+package to public so pulls work without a login. That change cannot be undone.
 
 ### What your users run
 
-Once published, anyone you've granted access to pulls and runs it with (after
-`docker login ghcr.io` with a `read:packages` token):
+Once the package is public:
 
 ```bash
 docker run -d --name prompt-etl \

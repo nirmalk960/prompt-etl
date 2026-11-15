@@ -1,6 +1,5 @@
 # Turnkey run for end users of the published image.
-# The image is private on GHCR, so first: docker login ghcr.io (read:packages).
-#   docker compose -f docker-compose.public.yml up -d
+#   docker compose -f deploy/docker-compose.public.yml up -d
 #   open http://localhost:8080
 services:
   prompt-etl:

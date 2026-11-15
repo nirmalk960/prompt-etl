@@ -1,8 +1,8 @@
 name: Publish single image
 
 # Builds and pushes the multi-arch single image to the GitHub Container Registry
-# (GHCR). The image inherits the repository's visibility, so a private repo
-# produces a private package by default.
+# (GHCR). The package keeps its own visibility. Anonymous pulls work after the
+# package is set to public.
 #   - push a tag like v0.1.0  -> publishes :0.1.0, :0.1, :latest
 #   - manual run (workflow_dispatch) -> publishes :latest (and optional input tag)
 #

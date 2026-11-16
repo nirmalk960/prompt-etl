@@ -40,6 +40,8 @@ image** behaves correctly on a 16 GB laptop and a 256 GB worker node.
 - [Testing](#testing)
 - [Publishing](#publishing)
 - [What's implemented](#whats-implemented-phase-1)
+- [Contributing](#contributing)
+- [Security](#security)
 - [License](#license)
 
 ---
@@ -516,6 +518,18 @@ See [`docs/PHASE2_SPARK.md`](docs/PHASE2_SPARK.md) and
 [`docs/PHASE3_PRODUCTION.md`](docs/PHASE3_PRODUCTION.md) for the design.
 
 ---
+
+## Contributing
+
+Bug reports, ideas, and pull requests are welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the PR checklist, and how the
+ops catalog is extended.
+
+## Security
+
+How to report vulnerabilities, the single-operator threat model, and hardening
+defaults live in [`SECURITY.md`](SECURITY.md). Please use a private advisory
+for security findings, not a public Issue.
 
 ## License
 
